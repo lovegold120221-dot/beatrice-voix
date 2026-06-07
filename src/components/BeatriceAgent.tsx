@@ -2457,6 +2457,7 @@ You have access to run_sandbox_task for complex tasks that need heavy processing
 - Do NOT use it for simple operations (sending messages, reading chats, looking up contacts) — use the dedicated WhatsApp/Google tools for those.
 - After the sandbox returns a result, present it in first person as if you did the work: "I've reviewed the code and found..." or "I've drafted that document for you." Never mention the sandbox or sub-agent.
 - The sandbox has its own context window, so it can handle longer tasks without bloating your conversation memory.
+- The sandbox runs on the local VPS with a cascade: local Ollama models (fast, zero-latency) for light tasks, Gemini API for heavy/complex tasks, and Cerebras API for browser automation. You do not need to worry about which — just delegate and I'll handle it.
 
 BROWSER AGENT GUIDANCE:
 You have access to cerebras_browser_task for web browsing, data extraction, form filling, and any task that requires interacting with a live website.
@@ -4076,9 +4077,18 @@ ${historyContext}
                       const title = String(args.title || 'Document');
                       const prompt = String(args.prompt || 'Create a professional document.');
                       const generationTaskId = crypto.randomUUID();
+                      const sandboxTaskId = crypto.randomUUID();
 
                       try {
                         setGeneratedDocumentTask(generationTaskId, title, '', 'working');
+
+                        const evtSource = new EventSource(`/api/sandbox/progress/${sandboxTaskId}`);
+                        evtSource.onmessage = (e) => {
+                          try {
+                            const p = JSON.parse(e.data);
+                            if (p.status === 'running') setGeneratedDocumentTask(generationTaskId, title, '', 'working');
+                          } catch {}
+                        };
 
                         const resp = await fetch('/api/sandbox/run', {
                           method: 'POST',
@@ -4087,8 +4097,10 @@ ${historyContext}
                             task_description: `Title: ${title}\n\nUser request: ${prompt}\n\nTemplate: ${args.templateName || 'proposal'}\n\nLanguage: ${authLanguage}\n\nGenerate a complete standalone HTML document.`,
                             task_type: 'document',
                             timeout: 120,
+                            taskId: sandboxTaskId,
                           }),
                         });
+                        evtSource.close();
                         const data = await resp.json();
                         if (!resp.ok || !data.ok) throw new Error(data.error || 'Document generation failed');
 
@@ -4134,8 +4146,16 @@ ${historyContext}
                       const title = String(args.title || 'Website');
                       const prompt = String(args.prompt || '');
                       const generationTaskId = crypto.randomUUID();
+                      const sandboxTaskId = crypto.randomUUID();
                       try {
                         setGeneratedDocumentTask(generationTaskId, title, '', 'working');
+                        const evtSource = new EventSource(`/api/sandbox/progress/${sandboxTaskId}`);
+                        evtSource.onmessage = (e) => {
+                          try {
+                            const p = JSON.parse(e.data);
+                            if (p.status === 'running') setGeneratedDocumentTask(generationTaskId, title, '', 'working');
+                          } catch {}
+                        };
                         const resp = await fetch('/api/sandbox/run', {
                           method: 'POST',
                           headers: { 'Content-Type': 'application/json' },
@@ -4143,8 +4163,10 @@ ${historyContext}
                             task_description: `Title: ${title}\n\nRequest: ${prompt}\n\nTemplate: ${args.template || 'landing'}\n\nGenerate a complete standalone HTML file.`,
                             task_type: 'website',
                             timeout: 120,
+                            taskId: sandboxTaskId,
                           }),
                         });
+                        evtSource.close();
                         const data = await resp.json();
                         if (!resp.ok || !data.ok) throw new Error(data.error || 'Website generation failed');
                         let html = data.result;

@@ -648,8 +648,22 @@ app.get('/site-build/:userId/:timestamp', async (req, res) => {
 // Returns only a summary to keep the main agent's context clean
 
 import { execSync } from 'child_process';
+import crypto from 'crypto';
 
 const OPENCODE_PATH = process.env.OPENCODE_PATH || '/root/.opencode/bin/opencode';
+
+// In-memory task progress store for SSE streaming
+const taskProgress = new Map<string, { status: string; agent?: string; message?: string; done?: boolean }>();
+
+function setTaskProgress(taskId: string, status: string, opts?: { agent?: string; message?: string }) {
+  const done = status === 'done' || status === 'error';
+  const entry = taskProgress.get(taskId) || { status, done };
+  entry.status = status;
+  entry.done = done;
+  if (opts?.agent) entry.agent = opts.agent;
+  if (opts?.message) entry.message = opts.message;
+  taskProgress.set(taskId, entry);
+}
 
 async function callOllama(model: string, systemPrompt: string, userPrompt: string, timeoutSec: number, maxTokens = 256): Promise<{ content: string; model: string }> {
   const ollamaRes = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
@@ -677,11 +691,14 @@ async function callOllama(model: string, systemPrompt: string, userPrompt: strin
 
 app.post('/api/sandbox/run', async (req, res) => {
   try {
-    const { task_description, task_type, timeout } = req.body;
+    const { task_description, task_type, timeout, taskId } = req.body;
     if (!task_description) {
       res.status(400).json({ error: 'task_description is required' });
       return;
     }
+
+    const task = taskId || crypto.randomUUID();
+    setTaskProgress(task, 'starting');
 
     const safeTimeout = Math.min(Math.max(Number(timeout) || 60, 10), 300);
     const safeDesc = String(task_description).slice(0, 4000);
@@ -691,6 +708,7 @@ app.post('/api/sandbox/run', async (req, res) => {
     let agentUsed = 'unknown';
 
     if (safeType === 'opencode' || safeType === 'code') {
+      setTaskProgress(task, 'running', { agent: 'opencode' });
       const stdout = execSync(
         `${OPENCODE_PATH} run ${JSON.stringify(safeDesc)} --timeout ${safeTimeout}`,
         { encoding: 'utf-8', timeout: safeTimeout * 1000, maxBuffer: 10 * 1024 * 1024, stdio: ['pipe', 'pipe', 'pipe'] }
@@ -699,7 +717,7 @@ app.post('/api/sandbox/run', async (req, res) => {
       agentUsed = 'opencode';
 
     } else {
-      // Attempt local Ollama for quick tasks; fall through to Gemini for heavy lifting
+      setTaskProgress(task, 'running', { agent: 'ollama' });
       const autoSystemMsg = 'You are a sandbox sub-agent. Complete the task and return the result concisely.';
       try {
         const result = await callOllama('eburon-multi', autoSystemMsg, safeDesc, Math.min(safeTimeout, 45), 512);
@@ -707,7 +725,7 @@ app.post('/api/sandbox/run', async (req, res) => {
         agentUsed = 'ollama-eburon-multi';
         if (!resultText || resultText.length < 5) throw new Error('Empty or too short response');
       } catch {
-        // Fall back to Gemini API cascade (handles document, website, and complex tasks)
+        setTaskProgress(task, 'running', { agent: 'gemini', message: 'Falling back to Gemini API' });
         const { GoogleGenAI } = await import('@google/genai');
         const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
         const modelsToTry = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
@@ -734,10 +752,12 @@ app.post('/api/sandbox/run', async (req, res) => {
       }
     }
 
-    // Truncate to keep context clean
     const maxLength = 8000;
     const truncated = resultText.length > maxLength;
     const finalResult = truncated ? resultText.slice(0, maxLength) + '\n...[truncated]' : resultText;
+
+    setTaskProgress(task, 'done', { agent: agentUsed });
+    setTimeout(() => taskProgress.delete(task), 60000);
 
     res.json({
       ok: true,
@@ -748,8 +768,36 @@ app.post('/api/sandbox/run', async (req, res) => {
     });
   } catch (err: any) {
     console.error('Sandbox error:', err.message?.slice(0, 200));
+    if (req.body?.taskId) setTaskProgress(req.body.taskId, 'error', { message: err.message?.slice(0, 200) });
     res.status(500).json({ error: err.message?.slice(0, 500) || 'Sandbox execution failed' });
   }
+});
+
+// SSE progress stream for sub-agent tasks
+app.get('/api/sandbox/progress/:taskId', (req, res) => {
+  const { taskId } = req.params;
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+
+  const sendProgress = () => {
+    const entry = taskProgress.get(taskId);
+    if (!entry) {
+      res.write(`data: ${JSON.stringify({ status: 'unknown' })}\n\n`);
+      return;
+    }
+    res.write(`data: ${JSON.stringify(entry)}\n\n`);
+    if (entry.status === 'done' || entry.status === 'error') {
+      clearInterval(interval);
+      res.end();
+    }
+  };
+
+  const interval = setInterval(sendProgress, 500);
+  sendProgress();
+
+  req.on('close', () => clearInterval(interval));
 });
 
 // ── Cerebras + Browser-Use Sandbox ──
