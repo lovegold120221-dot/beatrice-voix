@@ -1,0 +1,37 @@
+[project]
+id = "beatrice-local"
+name = "Beatrice Local"
+port = 54321
+
+[auth]
+enabled = true
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "storage", "graphql_public"]
+
+[db]
+port = 54322
+major_version = 15
+
+[studio]
+enabled = true
+port = 54323
+
+[inbucket]
+enabled = true
+port = 54324
+
+[storage]
+enabled = true
+file_size_limit = "50MB"
+
+[analytics]
+enabled = false
+
+[functions]
+enabled = false
+
+[email]
+enabled = true

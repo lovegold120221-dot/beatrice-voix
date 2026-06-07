@@ -1,6 +1,6 @@
 # Voxx-Zero — Belgian AI Voice Agent
 
-**Beatrice** is a real-time voice AI agent powered by the **Gemini Live API** with WhatsApp integration, multi-language support, persistent memory, a Cerebras-powered browser automation agent, and 10 specialized Belgian administrative tools. Built by [Eburon AI](https://eburon.ai).
+**Beatrice** is a real-time voice AI agent powered by the **Eburon Live API** with WhatsApp integration, multi-language support, persistent memory, a Cerebras-powered browser automation agent, and 10 specialized Belgian administrative tools. Built by [Eburon AI](https://eburon.ai).
 
 ---
 
@@ -23,7 +23,7 @@ Backend (Express + tsx)
   └─ Web Glance (DuckDuckGo)
 
 AI Layer
-  └─ Gemini 2.5 Flash Native Audio (Live API)
+  └─ Eburon Voice (Live API)
 
 Data Layer
   ├─ Supabase (PostgreSQL tool_outputs + memories)
@@ -37,7 +37,7 @@ Data Layer
 |---|---|
 | **Frontend** | React 19, Vite 6, Tailwind CSS v4, motion (Framer Motion) |
 | **Backend** | Express 4, tsx runtime, Node 22+ |
-| **AI Voice** | Gemini 2.5 Flash Native Audio |
+| **AI Voice** | Eburon Voice |
 | **Auth** | Firebase Auth (Google OAuth) |
 | **Database** | Supabase (PostgreSQL + Storage) |
 | **WhatsApp** | Baileys (`@whiskeysockets/baileys`) |
@@ -50,7 +50,7 @@ Data Layer
 - **Real-Time Voice** — Low-latency PCM16 bidirectional audio via WebSocket, VAD, interruption handling, 5 voice profiles
 - **WhatsApp Integration** — Baileys-based pairing (QR/OTP), full history sync, SSE real-time streaming, send/receive messages, manage contacts & groups, auto Belgian phone normalization
 - **Memory System** — `add_to_memory` / `search_memory` via Supabase, 10 most recent memories pre-loaded at session start
-- **Sandbox Sub-Agent** — Delegate complex tasks to a secondary AI (Gemini API or OpenCode CLI)
+- **Sandbox Sub-Agent** — Delegate complex tasks to a secondary AI (Eburon Core or OpenCode CLI)
 - **Cerebras Browser Agent** — Automated web browsing via Browser-Use + Cerebras inference
 - **10 Belgian Admin Tools** — KBO/CBE lookup, VIES VAT validation, Peppol e-invoicing, tax calendar, registration tax calc, itsme navigator, language bridge (FR/NL/EN), social security navigator, labor law simplifier, mobility planner (NMBS/SNCB)
 - **Multi-Language** — 147 languages, Flemish (nl-BE) primary, voice-driven language switching
@@ -63,7 +63,7 @@ Data Layer
 
 ### Prerequisites
 - Node.js 22+
-- A Gemini API key ([Google AI Studio](https://aistudio.google.com))
+- A Eburon Core key ([Google AI Studio](https://aistudio.google.com))
 - A Supabase project
 - A Firebase project (for auth)
 
@@ -74,7 +74,7 @@ cd xero
 npm install
 
 cp .env.example .env
-# Add your API keys: GEMINI_API_KEY, SUPABASE_*, FIREBASE_*
+# Add your API keys: EBURON_CORE_KEY, SUPABASE_*, FIREBASE_*
 
 npm run dev:full     # Frontend :3000 + Backend :4200
 # Or separately:
@@ -169,7 +169,7 @@ npm --prefix functions run build && firebase deploy --only functions
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `GEMINI_API_KEY` | ✅ | Gemini Live API |
+| `EBURON_CORE_KEY` | ✅ | Eburon Live API |
 | `SUPABASE_URL` | ✅ | Supabase project URL |
 | `SUPABASE_PUBLISHABLE_KEY` | ✅ | Supabase anon key |
 | `VITE_FIREBASE_*` | ✅ | Firebase config (API key, auth domain, project ID, etc.) |

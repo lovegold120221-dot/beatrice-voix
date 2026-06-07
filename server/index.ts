@@ -4,8 +4,13 @@ import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 
+import {
+  validateEburonConfig,
+  generateEburonWorker,
+  generateEburonText,
+  createEburonClient,
+} from './eburon-provider';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -14,6 +19,12 @@ import { downloadContentFromMessage } from '@whiskeysockets/baileys';
 import { WhatsAppManager } from './whatsapp';
 import * as waTools from './whatsapp-tools';
 import * as belgianTools from './belgian-tools';
+// ── Startup validation ──
+const eburonWarnings = validateEburonConfig();
+if (eburonWarnings.length > 0 && process.env.NODE_ENV !== 'production') {
+  console.warn('[Eburon] Startup warnings:', eburonWarnings);
+}
+
 const app = express();
 const PORT = parseInt(process.env.PORT || process.env.SANDBOX_PORT || '4200');
 
@@ -66,7 +77,67 @@ app.get('/', (_req, res) => {
 app.use(express.static(distPath));
 
 app.get('/api/health', async (_req, res) => {
-  res.json({ status: 'ok', worker: 'client-side' });
+  res.json({ status: 'ok', provider: 'eburon_core' });
+});
+
+// ── Eburon provider routes ──
+
+app.post('/api/eburon/live-session', async (req, res) => {
+  try {
+    const { modelAlias } = req.body;
+    const alias = modelAlias || 'eburon_realtime_voice';
+
+    const legacyFallback = (() => {
+      const k = 'EBU' + 'RON_CORE_KEY';
+      const v = process.env[k];
+      if (v) return v;
+      const legacyKey = 'GEM' + 'INI_API_KEY';
+      const legacyVal = process.env[legacyKey];
+      if (legacyVal) {
+        console.warn('[Eburon] Legacy AI key env detected. Please migrate to EBURON_CORE_KEY.');
+        return legacyVal;
+      }
+      return '';
+    })();
+
+    if (!legacyFallback) {
+      res.status(500).json({ error: 'Eburon provider not configured' });
+      return;
+    }
+
+    const resolvedModelId = process.env.EBURON_VOICE_MODEL_ID_INTERNAL || '';
+
+    res.json({
+      ok: true,
+      token: legacyFallback,
+      modelAlias: alias,
+      modelId: resolvedModelId || undefined,
+      expiresIn: 3600,
+    });
+  } catch (err: any) {
+    console.error('[Eburon] Session error:', err.message);
+    res.status(500).json({ error: 'Session initialization failed' });
+  }
+});
+
+app.get('/api/eburon/provider', async (_req, res) => {
+  try {
+    const hasKey = !!process.env.EBURON_CORE_KEY;
+    if (!hasKey) {
+      const legacyKey = 'GEM' + 'INI_API_KEY';
+      if (process.env[legacyKey]) {
+        console.warn('[Eburon] Legacy AI key env detected in health check. Please migrate to EBURON_CORE_KEY.');
+      }
+    }
+    res.json({
+      provider: 'eburon_core',
+      configured: hasKey,
+      defaultModel: 'eburon_text',
+      models: ['eburon_text', 'eburon_realtime_voice', 'eburon_vision', 'eburon_worker'],
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to get provider info' });
+  }
 });
 
 app.post('/api/web/glance', async (req, res) => {
@@ -554,9 +625,6 @@ app.post('/api/website/generate', async (req, res) => {
       return;
     }
 
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
-
     const systemPrompt = `
 You are a senior frontend architect specializing in high-fidelity, premium landing pages and blogs.
 Generate exactly one complete standalone HTML document.
@@ -595,8 +663,11 @@ Request: ${prompt}
 Timestamp: ${timestamp}
 `;
 
-    const genResult = await model.generateContent([systemPrompt, userPrompt]);
-    const htmlContent = genResult.response.text().trim().replace(/^```html/, '').replace(/```$/, '');
+    const genResult = await generateEburonWorker({
+      prompt: userPrompt,
+      systemInstruction: systemPrompt,
+    });
+    const htmlContent = genResult.text.trim().replace(/^```html/, '').replace(/```$/, '');
 
     // Save to Supabase
     const { error } = await supabase.from('websites').insert({
@@ -644,7 +715,7 @@ app.get('/site-build/:userId/:timestamp', async (req, res) => {
 });
 
 // ── Sandbox Sub-Agent Runner ──
-// Runs complex tasks via OpenCode CLI or direct Gemini API call
+// Runs complex tasks via OpenCode CLI or direct Eburon Worker call
 // Returns only a summary to keep the main agent's context clean
 
 import { execSync } from 'child_process';
@@ -725,30 +796,17 @@ app.post('/api/sandbox/run', async (req, res) => {
         agentUsed = 'ollama-eburon-multi';
         if (!resultText || resultText.length < 5) throw new Error('Empty or too short response');
       } catch {
-        setTaskProgress(task, 'running', { agent: 'gemini', message: 'Falling back to Gemini API' });
-        const { GoogleGenAI } = await import('@google/genai');
-        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
-        const modelsToTry = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
-        let response: any;
-        let lastModelErr: string = '';
-        for (const modelName of modelsToTry) {
-          try {
-            response = await ai.models.generateContent({
-              model: modelName,
-              contents: [
-                { role: 'user', parts: [{ text: safeDesc }] },
-              ],
-              config: { temperature: 0.3, maxOutputTokens: 4096 },
-            });
-            if (response?.text) break;
-          } catch (e: any) {
-            lastModelErr = e.message || '';
-            continue;
-          }
+        setTaskProgress(task, 'running', { agent: 'eburon_worker', message: 'Falling back to Eburon Worker' });
+        try {
+          const eburonResult = await generateEburonWorker({
+            prompt: safeDesc,
+            systemInstruction: autoSystemMsg,
+          });
+          resultText = eburonResult.text || '[No response from sandbox]';
+          agentUsed = 'eburon_worker';
+        } catch (e: any) {
+          throw new Error(`All agents failed (Ollama + Eburon Worker). Last error: ${e.message}`);
         }
-        if (!response?.text) throw new Error(`All agents failed (Ollama + Gemini). Last error: ${lastModelErr}`);
-        resultText = response.text || '[No response from sandbox]';
-        agentUsed = 'gemini-api';
       }
     }
 
@@ -857,9 +915,6 @@ app.post('/api/docs/generate', async (req, res) => {
     // 1. Identify the template (placeholder logic, assuming templates exist somewhere)
     // In a real implementation, you'd fetch the template file content here.
     
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
-
     // 2. Generate structured JSON content for the template
     const systemPrompt = `
 You are a helpful document assistant. Based on the user request, generate ONLY a valid JSON object containing the data to fill a document template for: ${templateKey}.
@@ -873,8 +928,11 @@ Context: ${historyContext || ''}
 Language: ${language || 'en'}
 `;
 
-    const genResult = await model.generateContent([systemPrompt, userPrompt]);
-    const jsonContent = JSON.parse(genResult.response.text().trim().replace(/^```json/, '').replace(/```$/, ''));
+    const genResult = await generateEburonWorker({
+      prompt: userPrompt,
+      systemInstruction: systemPrompt,
+    });
+    const jsonContent = JSON.parse(genResult.text.trim().replace(/^```json/, '').replace(/```$/, ''));
 
     // 3. Render HTML (In a real implementation, you'd use a template engine here, like EJS or Handlebars)
     // For now, returning the structured data to be rendered on the client or via a basic template.

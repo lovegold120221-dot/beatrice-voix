@@ -9,15 +9,11 @@ services:
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:
-      - key: GEMINI_API_KEY
-        sync: false
-      - key: VITE_GEMINI_API_KEY
-        sync: false
-      - key: IMAGE_GEN_API_KEY
+      - key: EBURON_CORE_KEY
         sync: false
       - key: SUPABASE_URL
         sync: false
-      - key: SUPABASE_PUBLISHABLE_KEY
+      - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
       - key: VITE_SUPABASE_URL
         sync: false

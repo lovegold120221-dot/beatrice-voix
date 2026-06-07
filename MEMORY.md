@@ -25,7 +25,7 @@ pm2 startup systemd -u root && pm2 save
 ```
 
 ### Environment Variables (VPS)
-- Gemini API key: (set on VPS via SSH)
+- Eburon Core key: (set on VPS via SSH)
 - Supabase: `https://tcwhnoxzqibqtpgedvbv.supabase.co`
 - Supabase anon key: `sb_publishable_fIU5XfFPF_EZaLv1o4SZCA_iK0sw8KW`
 - Cerebras key: (set on VPS via SSH)
@@ -44,9 +44,9 @@ pm2 startup systemd -u root && pm2 save
 ## Architecture Decisions
 
 ### AI Model
-- **Gemini Live API**: `gemini-2.5-flash-native-audio-preview-12-2025`
+- **Eburon Live API**: `eburon_realtime_voice`
 - SDK: `@google/genai` (dynamically imported)
-- Fallback for document gen: `gemini-2.5-flash` (non-voice)
+- Fallback for document gen: `eburon_text` (non-voice)
 - SDK class name obfuscated to prevent brand exposure in bundle
 
 ### WhatsApp
@@ -75,7 +75,7 @@ Removed god function `whatsapp_action` — replaced with individual functions:
 - `resolve_contact`, `send_whatsapp_text`, `send_whatsapp_contact_card`
 
 Also removed `execute_google_service` (redundant with dedicated Google functions).
-Removed `web_glance` (replaced by Gemini built-in googleSearch grounding).
+Removed `web_glance` (replaced by Eburon built-in googleSearch grounding).
 Removed auto-shutdown (90s silence timeout) — user must tap Stop.
 
 ### Memory System
@@ -84,7 +84,7 @@ Removed auto-shutdown (90s silence timeout) — user must tap Stop.
 - 10 most recent memories loaded into system prompt at session start
 
 ### Sandbox Sub-Agent
-- `run_sandbox_task` — delegates complex tasks to Gemini API via backend
+- `run_sandbox_task` — delegates complex tasks to Eburon Core via backend
 - `cerebras_browser_task` — Browser-Use + Cerebras for web browsing
 - Backend endpoints: `POST /api/sandbox/run`, `POST /api/cerebras/browser`
 - Python wrapper: `scripts/cerebras_browser.py` (uses .venv/bin/python3)
@@ -98,7 +98,7 @@ Removed auto-shutdown (90s silence timeout) — user must tap Stop.
 
 ## Key Bug Fixes
 
-1. **Empty `properties: {}` in function declarations** — Gemini Live API rejects these. Fixed by adding placeholder params.
+1. **Empty `properties: {}` in function declarations** — Eburon Live API rejects these. Fixed by adding placeholder params.
 2. **`String.fromCharCode` on import path** — Broke Vite resolution, reverted to plain string `'@google/genai'`.
 3. **`@vite-ignore` on dynamic import** — Prevented Vite from resolving package path, browser got bare specifier error.
 4. **`contextSize` in useEffect deps** — Slider movement triggered full settings reload, overwriting user's change before save.

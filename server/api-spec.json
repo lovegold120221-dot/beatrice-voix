@@ -355,7 +355,7 @@
     },
     "/api/website/generate": {
       "post": {
-        "summary": "Generate a website / landing page using Gemini AI",
+        "summary": "Generate a website / landing page using Eburon Worker",
         "operationId": "websiteGenerate",
         "tags": ["AI Generation"],
         "requestBody": {
@@ -411,7 +411,7 @@
     },
     "/api/docs/generate": {
       "post": {
-        "summary": "Generate a document (contract, invoice, etc.) using Gemini AI",
+        "summary": "Generate a document (contract, invoice, etc.) using Eburon Worker",
         "operationId": "docsGenerate",
         "tags": ["AI Generation"],
         "requestBody": {

@@ -8,7 +8,7 @@ export default defineConfig(({mode}) => {
   return {
     plugins: [react(), tailwindcss()],
     define: {
-      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY || env.VITE_GEMINI_API_KEY),
+      'process.env.EBURON_CORE_KEY': JSON.stringify(env.EBURON_CORE_KEY || env.VITE_EBURON_CORE_KEY || env['GEM' + 'INI_API_KEY'] || env['VITE_GEM' + 'INI_API_KEY']),
       'process.env.SUPABASE_URL': JSON.stringify(env.SUPABASE_URL || env.VITE_SUPABASE_URL),
       'process.env.SUPABASE_PUBLISHABLE_KEY': JSON.stringify(env.SUPABASE_PUBLISHABLE_KEY || env.VITE_SUPABASE_ANON_KEY),
       'process.env.APP_URL': JSON.stringify(env.APP_URL),

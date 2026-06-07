@@ -1,6 +1,6 @@
 # Beatrice App — Developer Overview
 
-> **Beatrice** is an AI voice assistant built by Eburon AI (founded by Joe Lernout). She speaks with an Irish accent, warm amber tones, and is accessed via a webapp that connects to Google's Gemini Live API for real-time voice conversation.
+> **Beatrice** is an AI voice assistant built by Eburon AI (founded by Joe Lernout). She speaks with an Irish accent, warm amber tones, and is accessed via a webapp that connects to Google's Eburon Live API for real-time voice conversation.
 
 ## Table of Contents
 
@@ -9,7 +9,7 @@
 3. [BeatriceAgent — The Core Component](#3-beatriceagent--the-core-component)
 4. [Voice Personality Prompt](#4-voice-personality-prompt)
 5. [Permission System](#5-permission-system)
-6. [Gemini Live Session Lifecycle](#6-gemini-live-session-lifecycle)
+6. [Eburon Live Session Lifecycle](#6-eburon-live-session-lifecycle)
 7. [Tool System](#7-tool-system)
 8. [Two-History System](#8-two-history-system)
 9. [Audio Pipeline](#9-audio-pipeline)
@@ -36,7 +36,7 @@
 │  │  router) │──│→ │VOICE_PERSONALITY_    │   │   │
 │  └──────────┘  │  │PROMPT (hardcoded)    │   │   │
 │       │        │  │                      │   │   │
-│       ▼        │  │Session → Gemini Live │   │   │
+│       ▼        │  │Session → Eburon Live │   │   │
 │  ┌──────────┐  │  │Tool execution        │   │   │
 │  │AuthPage  │  │  │Camera / Mic / Audio  │   │   │
 │  │EntryFlow │  │  │WhatsApp UI           │   │   │
@@ -60,15 +60,15 @@
 └─────────────────────────────────────────────────┘
         │                        │
         ▼                        ▼
-  Gemini Live API           Google APIs
-  (gemini-2.5-flash-        (Gmail, Calendar,
+  Eburon Live API           Google APIs
+  (eburon_text-        (Gmail, Calendar,
    native-audio-preview)     Tasks, Contacts)
 ```
 
 - **Frontend**: Single-page Vite + React 19 + TypeScript app
 - **Auth**: Firebase Auth (email/password + Google OAuth)
 - **Data**: Firebase Firestore (messages, user_settings) + Supabase (messages, user_settings, knowledge_files storage)
-- **AI**: Gemini Live API (`gemini-2.5-flash-native-audio-preview-09-2025`) with real-time bidirectional audio
+- **AI**: Eburon Live API (`eburon_realtime_voice`) with real-time bidirectional audio
 - **WhatsApp**: Baileys WhatsApp Web library (linked device) + WhatsApp Cloud API fallback
 - **Server**: Express.js backend (port 4200) for WhatsApp + web glance APIs
 
@@ -134,14 +134,14 @@ This single file contains:
 | Constants | 1–500 | `VOICE_PERSONALITY_PROMPT`, `GLOBAL_KNOWLEDGE_BASE`, tool declarations |
 | State | ~500–900 | All React state (sessions, permissions, UI state, camera, etc.) |
 | Dynamic prompt builder | ~900–1100 | `dynamicSystemInstruction()` + silence filler prompt |
-| startSession() | ~1100–1500 | Gemini Live session creation and configuration |
+| startSession() | ~1100–1500 | Eburon Live session creation and configuration |
 | onmessage callback | ~1500–2424 | Live API message handler (tool calls, audio, transcript) |
 | Tool execution switch | ~2424–2958 | The `switch(tool_name)` that handles all 17 tools |
 | UI render | ~2958–3642 | Settings panels, chat, camera, transcript, layout |
 
 ### Why is it so large?
 - The `VOICE_PERSONALITY_PROMPT` constant alone is ~350 lines
-- The single `onmessage` callback handles ALL Gemini Live events (audio, tool calls, transcript, errors)
+- The single `onmessage` callback handles ALL Eburon Live events (audio, tool calls, transcript, errors)
 - Tool execution is a single massive `switch` statement inside the callback
 - All UI rendering is in one component (no sub-components for settings, chat, camera, etc.)
 - The silence filler prompt builder is embedded inline (~80 lines)
@@ -221,7 +221,7 @@ WhatsAppSettings.tsx           BeatriceAgent.tsx
   │                          Injected into
   │                          dynamicSystemInstruction
   │                                │
-  │                          Gemini model sees what's
+  │                          Eburon model sees what's
   │                          permitted
   │                                │
   │                          Tool execution handler
@@ -248,14 +248,14 @@ The backend server (`server/whatsapp-tools.ts`) has its OWN independent permissi
 
 ### Key Behaviors
 - Permissions are injected into `dynamicSystemInstruction` at session START
-- Permission changes mid-session require reconnecting the Gemini Live session (system instruction is frozen for the session lifetime)
+- Permission changes mid-session require reconnecting the Eburon Live session (system instruction is frozen for the session lifetime)
 - Two separate permission states exist: `WhatsAppSettings` component state + `BeatriceAgent` `waPermissions` state — kept in sync via Firestore
-- The Gemini model reads permissions from the system instruction BEFORE deciding whether to call a tool
+- The Eburon model reads permissions from the system instruction BEFORE deciding whether to call a tool
 - The execution handler performs a SECOND check at runtime (defense in depth)
 
 ---
 
-## 6. Gemini Live Session Lifecycle
+## 6. Eburon Live Session Lifecycle
 
 ### Session Start
 ```
@@ -266,8 +266,8 @@ startSession()
   │
   ├── Create GoogleGenAI client
   │
-  ├── Connect to Gemini Live:
-  │     model: "gemini-2.5-flash-native-audio-preview-09-2025"
+  ├── Connect to Eburon Live:
+  │     model: "eburon_realtime_voice"
   │     modalities: AUDIO
   │     systemInstruction: dynamicSystemInstruction
   │     tools: [17 tool declarations]
@@ -276,7 +276,7 @@ startSession()
 ```
 
 ### `onmessage` Handler
-This single callback handles ALL incoming messages from Gemini Live:
+This single callback handles ALL incoming messages from Eburon Live:
 1. **Audio chunks** (`serverContent.modelTurn.parts[i].inlineData`): Decode base64 → play through AudioStreamer
 2. **Tool calls** (`serverContent.modelTurn.parts[i].functionCall`): Route to tool execution switch
 3. **Tool results**: Send back via `clientSocket.sendToolResponse()`
@@ -287,7 +287,7 @@ This single callback handles ALL incoming messages from Gemini Live:
 
 ### Audio Output Flow
 ```
-Gemini Live API
+Eburon Live API
   → audio chunk (base64 PCM16)
   → AudioStreamer.decodeAndEnqueue()
   → AudioBuffer queue
@@ -317,7 +317,7 @@ Gemini Live API
 | `send_gmail_message` | Send email via Gmail | — |
 | `google_contacts` | Search Google Contacts | — |
 | `get_user_location` | Get user's approximate location via ipapi.co | — |
-| `create_document` | Generate HTML documents via separate Gemini session | — |
+| `create_document` | Generate HTML documents via separate Eburon session | — |
 | `web_glance` | Web search via DuckDuckGo API | `browse_web` |
 | `idle_web_glance` | Idle web glance (periodic) | `browse_web` |
 | `toggle_camera` | Start/stop camera feed | — |
@@ -328,7 +328,7 @@ Gemini Live API
 
 ### Tool Execution Architecture
 ```
-Gemini Live → onmessage → functionCall detected
+Eburon Live → onmessage → functionCall detected
   │
   ▼
 switch(tool_name):
@@ -366,7 +366,7 @@ switch(tool_name):
   │     → fetch https://ipapi.co/json/
   │
   ├── "create_document"
-  │     → Create separate Gemini session (non-voice model)
+  │     → Create separate Eburon session (non-voice model)
   │     → Generate HTML
   │     → Return to model or open in new tab
   │
@@ -447,7 +447,7 @@ class AudioRecorder {
 }
 ```
 
-Captures microphone audio and sends as base64 chunks to the Gemini Live API.
+Captures microphone audio and sends as base64 chunks to the Eburon Live API.
 
 ### AmbientConversationBed
 Ambient background audio (optional, experimental). Plays a subtle background sound to create an "ambient conversation space."
@@ -460,17 +460,17 @@ Ambient background audio (optional, experimental). Plays a subtle background sou
 When `create_document` tool is called:
 
 1. Type is determined (webpage, dashboard, report/document, summarize, code)
-2. A SEPARATE Gemini session (non-voice model, `gemini-2.5-flash`) is created
+2. A SEPARATE Eburon session (non-voice model, `eburon_text`) is created
 3. A system prompt is sent based on document type:
    - **webpage**: Landing page with nav, hero, feature cards, footer. Dark theme + peach accent.
    - **dashboard**: Monitoring dashboard with metric cards, status indicators.
    - **report/document**: CEO-grade comprehensive document, ≥800 words, proper structure.
    - **summarize**: Structured summary.
    - **code**: Production-ready code.
-4. HTML is returned to Gemini or opened in a new browser tab
+4. HTML is returned to Eburon or opened in a new browser tab
 
 ### Legacy Server-side (Ollama)
-`server/eburon.ts` contains an `EburonWorker` class that generates documents via Ollama (local LLM). This appears to be an older/alternative path — the primary document generation is now client-side via Gemini.
+`server/eburon.ts` contains an `EburonWorker` class that generates documents via Ollama (local LLM). This appears to be an older/alternative path — the primary document generation is now client-side via Eburon.
 
 ---
 
@@ -550,7 +550,7 @@ Google OAuth is initiated from `AuthPage.tsx` via Firebase `signInWithPopup(Goog
 
 - Enabled by `toggle_camera` and `get_screenshot` tools
 - Uses `navigator.mediaDevices.getUserMedia()` to get video stream
-- Frames captured via `<canvas>` and sent as base64 JPEG to Gemini Live
+- Frames captured via `<canvas>` and sent as base64 JPEG to Eburon Live
 - `switch_camera` tool toggles between front and back cameras (`facingMode: 'user'` vs `'environment'`)
 - Video stream rendered in a small floating preview in the UI
 - Can be toggled on/off during conversation
@@ -669,7 +669,7 @@ npx tsx server/index.ts
 
 ### Prerequisites
 - Node.js 18+
-- A Gemini API key (`.env.local` → `GEMINI_API_KEY`)
+- A Eburon Core key (`.env.local` → `EBURON_CORE_KEY`)
 - Firebase project (config hardcoded in `firebase.ts`)
 - Supabase project (URL + anon key in `.env.local`)
 
@@ -677,7 +677,7 @@ npx tsx server/index.ts
 ```bash
 cd /path/to/voxx
 npm install
-cp .env.example .env.local    # Fill in GEMINI_API_KEY + Supabase + Firebase vars
+cp .env.example .env.local    # Fill in EBURON_CORE_KEY + Supabase + Firebase vars
 npm run dev                    # Vite at http://localhost:3000
 
 # In separate terminal (for WhatsApp support):
@@ -687,7 +687,7 @@ npx tsx server/index.ts        # Backend at http://localhost:4200
 ### Environment Variables
 | Variable | Required | Description |
 |---|---|---|
-| `GEMINI_API_KEY` | Yes | Google AI API key for Gemini |
+| `EBURON_CORE_KEY` | Yes | API key for Eburon Core |
 | `VITE_SANDBOX_URL` | Backend | Backend URL (default: http://localhost:4200) |
 | `SANDBOX_PORT` | Backend | Server port (default: 4200) |
 | `SANDBOX_ROOT` | Backend | Output directory for generated artifacts |
@@ -722,13 +722,13 @@ There is no test framework, no CI, no pre-commit hooks.
 - Permission changes require session reconnect (system instruction frozen per session).
 - Two permission checkpoints: model-level (system instruction) + execution-level (handler).
 
-### Gemini Live Session
+### Eburon Live Session
 - System instruction is FIXED for the lifetime of a Live session. Dynamic prompts are assembled before `startSession()`.
 - Audio modality is PCM16, single channel, 24kHz sample rate.
 - Tool results are sent back via `clientSocket.sendToolResponse()`, NOT as a return value.
 
 ### The `onmessage` Callback
-- This is a SINGLE function that handles ALL Gemini Live events. Adding a new tool?
+- This is a SINGLE function that handles ALL Eburon Live events. Adding a new tool?
   1. Add tool declaration to the declarations array
   2. Add execution case to the switch statement
   3. Both inside the same `onmessage` closure
@@ -745,7 +745,7 @@ There is no test framework, no CI, no pre-commit hooks.
 - User must re-link Google account if tokens expire.
 
 ### Document Generation
-- Creates a SEPARATE Gemini session (non-voice), which costs additional tokens.
+- Creates a SEPARATE Eburon session (non-voice), which costs additional tokens.
 - The system prompts for doc types are duplicated: one set in the `VOICE_PERSONALITY_PROMPT` (for the model's reference) and one set actually used in the generation call.
 
 ### Messages are Immutable

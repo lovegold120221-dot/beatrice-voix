@@ -15,11 +15,16 @@
     "docker:whatsapp:build": "docker compose -f docker-compose.whatsapp.yml build",
     "docker:whatsapp:up": "docker compose -f docker-compose.whatsapp.yml up",
     "docker:whatsapp:down": "docker compose -f docker-compose.whatsapp.yml down",
-    "smoke:whatsapp": "node scripts/smoke-whatsapp-server.mjs"
+    "smoke:whatsapp": "node scripts/smoke-whatsapp-server.mjs",
+    "db:start": "supabase start",
+    "db:stop": "supabase stop",
+    "db:reset": "supabase db reset",
+    "db:migrate": "supabase migration up",
+    "db:studio": "echo 'Supabase Studio: http://127.0.0.1:54323'",
+    "check:eburon-branding": "node scripts/check-eburon-branding.mjs"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
-    "@google/generative-ai": "^0.24.1",
     "@hapi/boom": "^10.0.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@supabase/supabase-js": "^2.106.2",

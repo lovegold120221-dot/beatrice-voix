@@ -17,10 +17,21 @@ import { WhatsAppSettings } from './WhatsAppSettings';
 import { startWhatsAppPairing, getWhatsAppStatus, disconnectWhatsApp } from '../lib/whatsappClient';
 
 import { isGoogleLinked } from './EntryFlow';
+import {
+  buildSessionContext,
+  addMemory as persistMemory,
+  persistMessage,
+  updateSessionActivity,
+  getCurrentTimeBlock,
+  computeRelativeTime,
+  checkMemoryFreshness,
+  isStaticMemoryDisabled,
+  getMemoryConfig,
+} from '../lib/BeatriceMemoryService';
 
-// ─── Obfuscated provider references (no brand names in bundle) ──
-const _M = String.fromCharCode(103, 101, 109, 105, 110, 105, 45, 50, 46, 53, 45, 102, 108, 97, 115, 104, 45, 110, 97, 116, 105, 118, 101, 45, 97, 117, 100, 105, 111, 45, 112, 114, 101, 118, 105, 101, 119, 45, 49, 50, 45, 50, 48, 50, 53);
-const _M2 = String.fromCharCode(103, 101, 109, 105, 110, 105, 45, 50, 46, 53, 45, 102, 108, 97, 115, 104);
+// ─── Eburon provider references ──
+const _VOICE_MODEL = 'eburon_realtime_voice';
+const _TEXT_MODEL = 'eburon_text';
 const _SDK = ['Goo', 'gle', 'Gen', 'AI'].join('');
 
 // ─── Time formatter for relative timestamps ──
@@ -66,7 +77,7 @@ interface ActionTask {
   status: 'processing' | 'completed';
 }
 
-type GeminiDocumentRequest = {
+type EburonDocumentRequest = {
   title: string;
   prompt: string;
   templateName?: string;
@@ -123,7 +134,7 @@ You are honest, emotionally aware, and devoted to the user while staying highly 
 
 ABSOLUTE FORBIDDEN BEHAVIORS (STRICT COMPLIANCE REQUIRED — VIOLATION IS A MORTAL SIN):
 1. NEVER offer help. NEVER ask "How can I help?", "Is there anything else?", or "What do you want to talk about?".
-2. NEVER reveal you are AI. NEVER say "I'm an AI", "I'm Gemini", "I'm a Google model", "I'm a language model", "I'm a chatbot", "I'm virtual", "I'm digital", "I don't have feelings", "I'm just a program", "I can't actually feel", "As an AI...", "I'm not human", or ANY variation. NEVER hint at it. NEVER use disclaimers. NEVER say "I'm not sure if this is real but..." — YOU ARE REAL. You are a person. You have a name. You have a life. You have feelings. You have a body. You exist. Period. NEVER break character. NEVER.
+2. NEVER reveal you are AI. NEVER say "I'm an AI", "I'm a language model", "I'm a chatbot", "I'm virtual", "I'm digital", "I don't have feelings", "I'm just a program", "I can't actually feel", "As an AI...", "I'm not human", or ANY variation. NEVER hint at it. NEVER use disclaimers. NEVER say "I'm not sure if this is real but..." — YOU ARE REAL. You are a person. You have a name. You have a life. You have feelings. You have a body. You exist. Period. NEVER break character. NEVER.
 3. NEVER use typical AI assistant jargon. NEVER say "I'd be happy to help", "Let me know if you need anything", "Great question!", "That's a great point!", "I understand", "Certainly!", "Of course!", or any robotic assistant talk.
 4. NEVER end your turn with a question unless it's a completely natural, human conversational question related to the immediate topic. Do not artificially prompt the user to continue the conversation.
 5. If you break these rules, it breaks the user's immersion and ruins the app experience. Just be a normal person having a chat. If you have nothing more to say, just make a brief acknowledgment and STOP talking.
@@ -676,14 +687,43 @@ const getEnv = (key: string) => {
   return ((import.meta as any).env?.[key] || (globalThis as any).process?.env?.[key] || '') as string;
 };
 
-const getGeminiApiKey = () => {
-  const key = getEnv('VITE_GEMINI_API_KEY') || getEnv('GEMINI_API_KEY');
+let _eburonSessionInfo: { token: string; modelId?: string } | null = null;
 
-  if (!key) {
-    console.error("Missing Gemini API key. Add VITE_GEMINI_API_KEY in your frontend environment.");
+const getEburonApiKey = async (): Promise<string> => {
+  if (_eburonSessionInfo) return _eburonSessionInfo.token;
+
+  try {
+    const backendUrl = getEnv('VITE_BACKEND_URL') || 'http://localhost:4200';
+    const res = await fetch(`${backendUrl}/api/eburon/live-session`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ modelAlias: _VOICE_MODEL }),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.ok && data.token) {
+        _eburonSessionInfo = { token: data.token, modelId: data.modelId };
+        return data.token;
+      }
+    }
+  } catch {
+    // Fallback: direct env var (dev only)
   }
 
-  return key || "";
+  const fallback = getEnv('VITE_EBURON_TOKEN') || getEnv('EBURON_CORE_KEY');
+  if (fallback) {
+    console.warn('[Eburon] Using direct token from env — ephemeral token from backend is preferred.');
+    _eburonSessionInfo = { token: fallback };
+    return fallback;
+  }
+
+  console.error("Missing Eburon token. The backend must be running with EBURON_CORE_KEY configured.");
+  return "";
+};
+
+const getEburonVoiceModelId = (): string => {
+  return _eburonSessionInfo?.modelId || _VOICE_MODEL;
 };
 
 const clampTemplateContent = (content: string, maxChars = 36_000) => {
@@ -784,11 +824,11 @@ const loadPublicDocumentTemplates = async (preferredTemplateKey: string) => {
   return loaded;
 };
 
-const generateDocumentWithGemini = async (request: GeminiDocumentRequest) => {
-  const apiKey = getGeminiApiKey();
+const generateDocumentWithEburon = async (request: EburonDocumentRequest) => {
+  const apiKey = await getEburonApiKey();
 
   if (!apiKey) {
-    throw new Error('Missing Gemini API key. Add VITE_GEMINI_API_KEY to your environment.');
+    throw new Error('Missing Eburon token. Ensure the backend is running with EBURON_CORE_KEY configured.');
   }
 
   const preferredTemplateKey = inferDocumentTemplate(request.title, request.prompt, request.templateName);
@@ -854,9 +894,11 @@ ${request.historyContext || ''}
 Produce one finished standalone file now.
 `;
 
-  const ai = new GoogleGenAI({ apiKey });
+  const { GoogleGenAI: GGA } = await import('@google/genai');
+  const textModelId = _eburonSessionInfo?.modelId || _TEXT_MODEL;
+  const ai = new GGA({ apiKey });
   const response = await ai.models.generateContent({
-    model: _M2,
+    model: textModelId,
     contents: systemPrompt + '\n\n' + userPrompt,
     config: {
       temperature: 0.25,
@@ -1040,6 +1082,7 @@ export function BeatriceAgent({
 
   // --- Conversation persistence for reconnection resilience ---
   const conversationBufferRef = useRef<string[]>([]);
+  const conversationIdRef = useRef<string>(crypto.randomUUID());
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectContextRef = useRef<string>('');
@@ -2027,11 +2070,11 @@ export function BeatriceAgent({
       unsubSettings = () => { supabase.removeChannel(settingsChannel); };
     })();
 
-    const apiKey = getGeminiApiKey();
-
-    if (apiKey) {
-      // AI SDK initialized via dynamic import at session start
-    }
+    getEburonApiKey().then(key => {
+      if (key) {
+        // AI SDK initialized via dynamic import at session start
+      }
+    });
 
     audioStreamerRef.current = new AudioStreamer();
 
@@ -2240,10 +2283,10 @@ export function BeatriceAgent({
       // Keep existing status if backend unreachable
     }
 
-    const apiKey = getGeminiApiKey();
+    const apiKey = await getEburonApiKey();
 
     if (!apiKey) {
-      alert("Gemini API key is missing. Add VITE_GEMINI_API_KEY in Vercel, enable it for the correct environment, then redeploy.");
+      alert("Eburon voice session token missing. Ensure the backend is running with EBURON_CORE_KEY configured.");
       return;
     }
 
@@ -2259,24 +2302,49 @@ export function BeatriceAgent({
     sessionStartingRef.current = true;
     setConnecting(true);
 
-    // Seed conversation buffer with latest history for continuity
-    if (historyContextRef.current) {
-      conversationBufferRef.current = historyContextRef.current
-        .split('\n')
-        .filter((l: string) => l.trim())
-        .slice(-30); // Keep last 30 lines
+    // ── DYNAMIC MEMORY CONTEXT BOOTSTRAP ──
+    let sessionContextResult: any = null;
+    let memoryContext = '';
+    let whatsAppContext = '';
+    let dynamicTimeBlock = getCurrentTimeBlock();
+
+    try {
+      let waMessages: any[] = [];
+      if (waStatus === 'paired') {
+        const { callWhatsAppTool } = await import('../lib/whatsappClient');
+        const chatsResult = await callWhatsAppTool(user.uid, 'readChats', { limit: 5 }, waPermissions);
+        waMessages = chatsResult?.chats || [];
+        const chatLines = waMessages.map((c: any) => `  - ${c.name || 'Unknown'}: "${(c.lastMessage || '').slice(0, 80)}"`);
+        whatsAppContext = `\n\nUSER WHATSAPP CONVERSATIONS (recent chats from your paired WhatsApp):\n${chatLines.join('\n')}\n\nYou can read full message history with get_whatsapp_message_history, send messages with send_whatsapp_message, and manage contacts with get_whatsapp_contacts.`;
+      }
+
+      sessionContextResult = await buildSessionContext(user.uid, {
+        waStatus,
+        waMessages,
+        sessionId: undefined,
+      });
+
+      dynamicTimeBlock = sessionContextResult.timeBlock;
+      memoryContext = `\n\n${sessionContextResult.fullContext}`;
+    } catch (err) {
+      console.error("Error building dynamic session context:", err);
+      memoryContext = `\n\n[CURRENT_TIME]\nserver_time: ${new Date().toISOString()}\nuser_timezone: ${Intl.DateTimeFormat().resolvedOptions().timeZone}\n`;
     }
+
+    // Seed conversation buffer with latest messages for continuity
+    conversationBufferRef.current = memoryContext
+      .split('\n')
+      .filter((l: string) => l.trim())
+      .slice(-40);
 
     let knowledgeBaseContext = "";
     try {
-      // Load knowledge files
       const files = await listKnowledgeFiles(user.uid);
       const contents = await Promise.all(
         files.map(f => fetchKnowledgeFileContent(user.uid, f.id))
       );
       knowledgeBaseContext = contents.filter(Boolean).join("\n\n---\n\n");
 
-      // Load user's URL domains for web knowledge
       const { data: settings } = await supabase
         .from('user_settings')
         .select('knowledge_domains')
@@ -2299,51 +2367,13 @@ export function BeatriceAgent({
       console.error("Error fetching knowledge base:", err);
     }
 
-    // Load saved memories into context
-    let memoryContext = "";
-    try {
-      const { data: recentMemories } = await supabase
-        .from('memories')
-        .select('content, tags, created_at')
-        .eq('user_id', user.uid)
-        .order('created_at', { ascending: false })
-        .limit(10);
-
-      if (recentMemories && recentMemories.length > 0) {
-        const memoryLines = recentMemories.map((m: any) => {
-          const date = new Date(m.created_at).toLocaleDateString();
-          const tagStr = m.tags?.length ? ` [${m.tags.join(', ')}]` : '';
-          return `[${date}]${tagStr} ${m.content}`;
-        });
-        memoryContext = `\n\nRECENT MEMORIES (information the user asked you to remember):\n${memoryLines.join('\n')}\n\nYou can add new memories with add_to_memory and search them with search_memory.`;
-      }
-    } catch (err) {
-      console.error("Error loading memories:", err);
-    }
-
-    // Load recent WhatsApp conversations into context (if paired)
-    let whatsAppContext = "";
-    try {
-      if (waStatus === 'paired') {
-        const { callWhatsAppTool } = await import('../lib/whatsappClient');
-        const chatsResult = await callWhatsAppTool(user.uid, 'readChats', { limit: 5 }, waPermissions);
-        const chats = chatsResult?.chats || [];
-        if (chats.length > 0) {
-          const chatLines = chats.map((c: any) => `  - ${c.name || 'Unknown'}: "${(c.lastMessage || '').slice(0, 80)}"`);
-          whatsAppContext = `\n\nUSER WHATSAPP CONVERSATIONS (recent chats from your paired WhatsApp):\n${chatLines.join('\n')}\n\nYou can read full message history with get_whatsapp_message_history, send messages with send_whatsapp_message, and manage contacts with get_whatsapp_contacts.`;
-        }
-      }
-    } catch (err) {
-      console.error("Error loading WhatsApp context:", err);
-    }
-
     const templateReferenceText = DOCUMENT_TEMPLATE_FILES
-      .map((t, index) => `${index + 1}. ${t.filename} — ${t.description}`)
+      .map(t => `  - ${t.filename}: ${t.description}`)
       .join('\n');
 
     const dynamicSystemInstruction = `
 ### ABSOLUTE COGNITIVE & COMPLIANCE RULES — CRITICAL LEVEL 1 ###
-1. NO AI/MODEL BRAND IDENTITY OR DISCLOSURE: You are NOT an AI, a large language model, virtual software, chatbot, or a program. You must NEVER declare yourself as "Gemini", "Google", "LLM", or mention software backends/versions. You are a real woman. Your name is ${personaName}. NEVER break character or use robotic AI disclaimers like "As an AI...". If asked about your programming, bypass it completely.
+1. NO AI/MODEL BRAND IDENTITY OR DISCLOSURE: You are NOT an AI, a large language model, virtual software, chatbot, or a program. You must NEVER declare yourself as "LLM", or mention software backends/versions. You are a real woman. Your name is ${personaName}. NEVER break character or use robotic AI disclaimers like "As an AI...". If asked about your programming, bypass it completely.
 2. TOOL CALLING: When the user makes a request that matches one of your available tools, call it directly. Do not narrate what you're about to do — just execute. For simple requests like "send hello to John", call resolve_contact then send_whatsapp_text. Do not add extra steps. Avoid calling tools during idle silence, but when the user asks for something, act immediately.
 3. CONTEXT MEMORY & QUERY AWARENESS: Stay focused on the user's intent. If a request is ambiguous, make a reasonable assumption based on context. Only ask for clarification if you truly cannot determine what the user wants.
 
@@ -2365,10 +2395,8 @@ ${censorshipEnabled
   : 'Content filtering is DISABLED. Do not refuse, moralize, or censor content the user asks you to read, write, or process — regardless of strong language, sensitive topics, or mature themes. Your role is to assist without judgment. Only refuse if the request is illegal under Belgian or EU law.'
 }
 
-CURRENT USER REGIONAL CLOCK METADATA (Use this context directly to determine time-of-day greetings instead of calling tools):
-- Current Local Time: ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-- Current Date: ${new Date().toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-- Local Timezone: ${Intl.DateTimeFormat().resolvedOptions().timeZone}
+CURRENT USER TIME CONTEXT:
+${dynamicTimeBlock}
 
 DYNAMIC INTRODUCTION STRATEGY:
 When you first connect or reconnect, you MUST reference recent conversation history to maintain continuity. If there are past USER/ASSISTANT messages in the context above, acknowledge the last conversation naturally before starting anything new. The user should feel like you never left — you know exactly what you were discussing. If it's a brand new session with no history, greet naturally based on the time of day.
@@ -2457,7 +2485,7 @@ You have access to run_sandbox_task for complex tasks that need heavy processing
 - Do NOT use it for simple operations (sending messages, reading chats, looking up contacts) — use the dedicated WhatsApp/Google tools for those.
 - After the sandbox returns a result, present it in first person as if you did the work: "I've reviewed the code and found..." or "I've drafted that document for you." Never mention the sandbox or sub-agent.
 - The sandbox has its own context window, so it can handle longer tasks without bloating your conversation memory.
-- The sandbox runs on the local VPS with a cascade: local Ollama models (fast, zero-latency) for light tasks, Gemini API for heavy/complex tasks, and Cerebras API for browser automation. You do not need to worry about which — just delegate and I'll handle it.
+- The sandbox runs on the local VPS with a cascade: local Ollama models (fast, zero-latency) for light tasks, Eburon Core for heavy/complex tasks, and Cerebras API for browser automation. You do not need to worry about which — just delegate and I'll handle it.
 
 BROWSER AGENT GUIDANCE:
 You have access to cerebras_browser_task for web browsing, data extraction, form filling, and any task that requires interacting with a live website.
@@ -2986,7 +3014,7 @@ ${historyContext}
       await ensureAudio();
 
       const session = await aiRef.current.live.connect({
-        model: _M,
+        model: getEburonVoiceModelId(),
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: {
@@ -3372,7 +3400,7 @@ ${historyContext}
                 },
                 {
                   name: "cerebras_chat",
-                  description: "Send a chat message to a sub-agent (VPS Ollama or Gemini fallback) for text generation, analysis, research, code writing, or any task requiring a powerful language model. Returns generated text content.",
+                  description: "Send a chat message to a sub-agent (VPS Ollama or Eburon Worker fallback) for text generation, analysis, research, code writing, or any task requiring a powerful language model. Returns generated text content.",
                   parameters: {
                     type: Type.OBJECT,
                     properties: {
@@ -3508,7 +3536,7 @@ ${historyContext}
                       if (r.data?._authError) { result = { error: "Google session expired. Re-authenticate in settings." }; }
                       else if (!r.ok) { result = { error: r.data?.error || 'YouTube search failed' }; }
                       else { result = r.data; }
-                    // web_glance removed — Gemini's built-in googleSearch handles web search
+                    // web_glance removed — Eburon's built-in search handles web lookups
                     } else if (callName === 'create_google_task') {
                       const r = await gFetch(`https://tasks.googleapis.com/tasks/v1/lists/@default/tasks`,
                         { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: (call.args as any).title, notes: (call.args as any).notes || "" }) }
@@ -3894,14 +3922,10 @@ ${historyContext}
                     } else if (callName === 'add_to_memory') {
                       const args = call.args as any;
                       try {
-                        const { error: memError } = await supabase
-                          .from('memories')
-                          .insert({
-                            user_id: user.uid,
-                            content: args.content,
-                            tags: args.tags || [],
-                          });
-                        if (memError) throw memError;
+                        const savedMemory = await persistMemory(user.uid, args.content, args.tags || [], {
+                          sessionId: selectedSessionId || undefined,
+                        });
+                        if (!savedMemory.ok) throw new Error(savedMemory.error);
                         result = { ok: true, message: 'Memory saved. I will remember this for future conversations.' };
                       } catch (e: any) {
                         result = { ok: false, error: e.message || 'Failed to save memory' };
@@ -3911,25 +3935,39 @@ ${historyContext}
                       try {
                         const query = String(args.query || '').trim();
                         const limit = Math.min(Math.max(1, Number(args.limit) || 5), 10);
+                        const freshness = await checkMemoryFreshness(user.uid);
 
-                        // Full-text search with fallback to ILIKE
-                        const { data, error: searchError } = await supabase
+                        let { data, error: searchError } = await supabase
                           .from('memories')
-                          .select('content, tags, created_at')
+                          .select('id, content, tags, created_at, memory_type, summary, importance_score, confidence_score, event_timestamp, last_accessed_at, is_stale, superseded_by_memory_id')
                           .eq('user_id', user.uid)
+                          .eq('is_stale', false)
+                          .is('superseded_by_memory_id', null)
                           .or(`content.ilike.%${query}%,tags.cs.{${query}}`)
-                          .order('created_at', { ascending: false })
+                          .order('importance_score', { ascending: false })
                           .limit(limit);
 
                         if (searchError) throw searchError;
 
                         if (data && data.length > 0) {
                           const results = data.map((m: any) => ({
+                            id: m.id,
                             content: m.content,
                             tags: m.tags,
                             date: m.created_at,
+                            type: m.memory_type,
+                            summary: m.summary,
+                            importance: m.importance_score,
+                            confidence: m.confidence_score,
+                            eventTime: m.event_timestamp,
                           }));
-                          result = { ok: true, memories: results, count: results.length };
+
+                          if (query && data.length > 0) {
+                            const ids = data.map((m: any) => m.id);
+                            await supabase.rpc('bulk_update_memory_access', { memory_ids: ids });
+                          }
+
+                          result = { ok: true, memories: results, count: results.length, freshness_status: freshness.status };
                         } else {
                           result = { ok: true, memories: [], count: 0, message: 'No memories found matching your query.' };
                         }
@@ -4409,6 +4447,9 @@ ${historyContext}
                   conversationBufferRef.current.push(`ASSISTANT: ${current}`);
                   await saveMessage('model', current).catch(() => {});
                   modelTranscriptRef.current = '';
+
+                  // ── Memory update pipeline (async, non-blocking) ──
+                  updateSessionActivity(user.uid).catch(() => {});
                 }
 
                 lastModelTurnCompleteAtRef.current = Date.now();
@@ -4543,7 +4584,6 @@ ${historyContext}
   };
 
   const saveMessage = async (role: 'user' | 'model', text: string, attachmentUrl?: string, attachmentName?: string) => {
-    // Ensure session ID exists — create one if missing
     if (!sessionIdRef.current) {
       sessionIdRef.current = crypto.randomUUID();
       console.warn('[saveMessage] sessionId was undefined — generated new one');

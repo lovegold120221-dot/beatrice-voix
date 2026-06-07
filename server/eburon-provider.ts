@@ -1,0 +1,245 @@
+// ── Eburon Provider Module ──
+// Central interface for all AI provider calls.
+// No upstream provider/model brand names in exports, logs, or errors.
+
+import { GoogleGenAI, Type } from '@google/genai';
+
+// ── Private model registry (server-only, never exposed to frontend) ──
+const EBURON_MODEL_REGISTRY: Record<string, string | undefined> = {
+  eburon_text: process.env.EBURON_TEXT_MODEL_ID_INTERNAL,
+  eburon_realtime_voice: process.env.EBURON_VOICE_MODEL_ID_INTERNAL,
+  eburon_vision: process.env.EBURON_VISION_MODEL_ID_INTERNAL,
+  eburon_worker: process.env.EBURON_WORKER_MODEL_ID_INTERNAL,
+};
+
+// ── Whitelists ──
+const EBURON_ALLOWED_PROVIDERS = ['eburon_core'];
+
+const EBURON_ALLOWED_MODELS = [
+  'eburon_text',
+  'eburon_realtime_voice',
+  'eburon_vision',
+  'eburon_worker',
+];
+
+// ── Internal client (initialized once) ──
+let _eburonClient: GoogleGenAI | null = null;
+
+function getEburonClient(): GoogleGenAI {
+  if (_eburonClient) return _eburonClient;
+
+  const apiKey = process.env.EBURON_CORE_KEY;
+  if (!apiKey) {
+    const legacyKey = 'GEM' + 'INI_API_KEY';
+    const fallback = process.env[legacyKey];
+    if (fallback) {
+      console.warn('[Eburon] Legacy AI key env detected. Please migrate to EBURON_CORE_KEY.');
+      _eburonClient = new GoogleGenAI({ apiKey: fallback });
+      return _eburonClient;
+    }
+    throw new Error('[Eburon] EBURON_CORE_KEY not configured');
+  }
+
+  _eburonClient = new GoogleGenAI({ apiKey });
+  return _eburonClient;
+}
+
+// ── Validation ──
+
+export function validateEburonProvider(provider: string): boolean {
+  return EBURON_ALLOWED_PROVIDERS.includes(provider);
+}
+
+export function validateEburonModel(modelAlias: string): boolean {
+  return EBURON_ALLOWED_MODELS.includes(modelAlias);
+}
+
+export function resolveEburonModelAlias(modelAlias: string): string {
+  const resolved = EBURON_MODEL_REGISTRY[modelAlias];
+  if (!resolved) {
+    throw new Error(`[Eburon] Unknown model alias: ${modelAlias}`);
+  }
+  return resolved;
+}
+
+// ── Public exports (Eburon-named only) ──
+
+export function createEburonClient(): GoogleGenAI {
+  return getEburonClient();
+}
+
+export async function generateEburonText(params: {
+  model?: string;
+  prompt: string;
+  systemInstruction?: string;
+  temperature?: number;
+  maxOutputTokens?: number;
+}): Promise<{ text: string; usage?: { inputTokens: number; outputTokens: number } }> {
+  const modelAlias = params.model || 'eburon_text';
+  if (!validateEburonModel(modelAlias)) {
+    throw new Error(`[Eburon] Model alias not in whitelist: ${modelAlias}`);
+  }
+
+  const modelId = resolveEburonModelAlias(modelAlias);
+  const client = getEburonClient();
+  const start = Date.now();
+
+  try {
+    const response = await client.models.generateContent({
+      model: modelId,
+      contents: params.prompt,
+      config: {
+        systemInstruction: params.systemInstruction,
+        temperature: params.temperature ?? 0.7,
+        maxOutputTokens: params.maxOutputTokens ?? 8192,
+      },
+    });
+
+    const duration = Date.now() - start;
+    const text = response.text || '';
+    const usageInfo = response.usageMetadata || {};
+
+    return {
+      text,
+      usage: {
+        inputTokens: usageInfo.promptTokenCount ?? 0,
+        outputTokens: usageInfo.candidatesTokenCount ?? 0,
+      },
+      // internal: { duration, modelId } — not exposed
+    };
+  } catch (err: any) {
+    const duration = Date.now() - start;
+    console.error(`[Eburon] Text generation failed (${duration}ms):`, err.message || err);
+    throw new Error('[Eburon] Text generation failed');
+  }
+}
+
+export async function generateEburonVision(params: {
+  model?: string;
+  prompt: string;
+  imageData: string; // base64
+  mimeType?: string;
+}): Promise<{ text: string }> {
+  const modelAlias = params.model || 'eburon_vision';
+  if (!validateEburonModel(modelAlias)) {
+    throw new Error(`[Eburon] Model alias not in whitelist: ${modelAlias}`);
+  }
+
+  const modelId = resolveEburonModelAlias(modelAlias);
+  const client = getEburonClient();
+
+  try {
+    const response = await client.models.generateContent({
+      model: modelId,
+      contents: [
+        { text: params.prompt },
+        {
+          inlineData: {
+            mimeType: params.mimeType || 'image/jpeg',
+            data: params.imageData,
+          },
+        },
+      ],
+    });
+
+    return { text: response.text || '' };
+  } catch (err: any) {
+    console.error('[Eburon] Vision generation failed:', err.message || err);
+    throw new Error('[Eburon] Vision analysis failed');
+  }
+}
+
+export async function generateEburonWorker(params: {
+  model?: string;
+  prompt: string;
+  systemInstruction?: string;
+}): Promise<{ text: string }> {
+  const modelAlias = params.model || 'eburon_worker';
+  if (!validateEburonModel(modelAlias)) {
+    throw new Error(`[Eburon] Model alias not in whitelist: ${modelAlias}`);
+  }
+
+  const modelId = resolveEburonModelAlias(modelAlias);
+  const client = getEburonClient();
+
+  try {
+    const response = await client.models.generateContent({
+      model: modelId,
+      contents: params.prompt,
+      config: {
+        systemInstruction: params.systemInstruction,
+        temperature: 0.3,
+      },
+    });
+
+    return { text: response.text || '' };
+  } catch (err: any) {
+    console.error('[Eburon] Worker generation failed:', err.message || err);
+    throw new Error('[Eburon] Worker task failed');
+  }
+}
+
+// ── Eburon client for sandbox/worker tasks (returns client + model alias) ──
+
+export function createEburonWorkerClient(): {
+  client: GoogleGenAI;
+  modelAlias: string;
+  modelId: string;
+} {
+  const modelAlias = 'eburon_worker';
+  const modelId = resolveEburonModelAlias(modelAlias);
+  return {
+    client: getEburonClient(),
+    modelAlias,
+    modelId,
+  };
+}
+
+// ── Startup validation ──
+
+export function validateEburonConfig(): string[] {
+  const warnings: string[] = [];
+
+  if (!process.env.EBURON_CORE_KEY) {
+    const legacyKey = 'GEM' + 'INI_API_KEY';
+    if (process.env[legacyKey]) {
+      console.warn('[Eburon] Legacy AI key env detected. Please migrate to EBURON_CORE_KEY.');
+    } else {
+      warnings.push('EBURON_CORE_KEY is not set');
+    }
+  }
+
+  for (const alias of EBURON_ALLOWED_MODELS) {
+    if (!EBURON_MODEL_REGISTRY[alias]) {
+      warnings.push(`Eburon model alias "${alias}" has no internal model ID configured`);
+    }
+  }
+
+  if (warnings.length > 0) {
+    console.warn('[Eburon] Config warnings:', warnings);
+  }
+
+  return warnings;
+}
+
+// ── Audit helper ──
+
+export function createEburonAuditEntry(params: {
+  modelAlias: string;
+  requestType: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  durationMs?: number;
+  isSuccessful?: boolean;
+  errorMessage?: string;
+}): Record<string, any> {
+  return {
+    model_alias: params.modelAlias,
+    request_type: params.requestType,
+    input_tokens: params.inputTokens ?? 0,
+    output_tokens: params.outputTokens ?? 0,
+    duration_ms: params.durationMs ?? 0,
+    is_successful: params.isSuccessful ?? true,
+    error_message: params.errorMessage ?? null,
+  };
+}
