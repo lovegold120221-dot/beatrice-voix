@@ -686,33 +686,6 @@ const getGeminiApiKey = () => {
   return key || "";
 };
 
-const CEREBRAS_API_KEY = 'csk-c5e2ftmc6ecm5n38eppt6fnrd66dxcven5jywhywekjy3xjt';
-
-const callCerebrasAPI = async (messages: { role: string; content: string }[], options?: { model?: string; temperature?: number; max_tokens?: number }) => {
-  const response = await fetch('https://api.cerebras.ai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${CEREBRAS_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: options?.model || 'gpt-oss-120b',
-      stream: false,
-      messages,
-      temperature: options?.temperature ?? 0,
-      max_completion_tokens: options?.max_tokens ?? -1,
-      seed: 0,
-      top_p: 1,
-    }),
-  });
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Cerebras API error ${response.status}: ${err}`);
-  }
-  const data = await response.json();
-  return data.choices?.[0]?.message?.content || '';
-};
-
 const clampTemplateContent = (content: string, maxChars = 36_000) => {
   if (content.length <= maxChars) return content;
   return content.slice(0, maxChars) + "\n<!-- TEMPLATE TRUNCATED FOR CONTEXT SIZE -->";
@@ -3385,7 +3358,7 @@ ${historyContext}
                 },
                 {
                   name: "generate_website",
-                  description: "Generate a complete, production-ready website using Cerebras AI. Creates a standalone HTML file with embedded CSS and JavaScript. Use this when the user asks you to build a website, landing page, dashboard, portfolio, blog, or e-commerce page.",
+                  description: "Generate a complete, production-ready website. Creates a standalone HTML file with embedded CSS and JavaScript. Use this when the user asks you to build a website, landing page, dashboard, portfolio, blog, or e-commerce page.",
                   parameters: {
                     type: Type.OBJECT,
                     properties: {
@@ -3398,7 +3371,7 @@ ${historyContext}
                 },
                 {
                   name: "cerebras_chat",
-                  description: "Send a chat message to the Cerebras LLM for text generation, analysis, research, code writing, or any task requiring a powerful language model. Returns generated text content.",
+                  description: "Send a chat message to a sub-agent (VPS Ollama or Gemini fallback) for text generation, analysis, research, code writing, or any task requiring a powerful language model. Returns generated text content.",
                   parameters: {
                     type: Type.OBJECT,
                     properties: {
@@ -3884,24 +3857,36 @@ ${historyContext}
                     } else if (callName === 'run_sandbox_task') {
                       const args = call.args as any;
                       try {
-                        const systemMsg = `You are a sandbox AI agent with deep expertise in code, analysis, research, and writing. Execute the requested task thoroughly and return detailed results.`;
-                        const content = await callCerebrasAPI([
-                          { role: 'system', content: systemMsg },
-                          { role: 'user', content: `Task type: ${args.task_type || 'auto'}\n\nDescription:\n${args.task_description || ''}\n\nProvide a complete, well-structured response.` }
-                        ], { model: 'gpt-oss-120b', temperature: 0.1, max_tokens: 4096 });
-                        result = { ok: true, result: content, generatedBy: 'cerebras' };
+                        const resp = await fetch('/api/sandbox/run', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            task_description: args.task_description || '',
+                            task_type: args.task_type || 'auto',
+                            timeout: args.timeout || 60,
+                          }),
+                        });
+                        const data = await resp.json();
+                        if (!resp.ok) throw new Error(data.error || `Sandbox error (${resp.status})`);
+                        result = { ok: true, result: data.result, agent: data.agent || 'backend' };
                       } catch (e: any) {
                         result = { ok: false, error: e.message || 'Sandbox task failed' };
                       }
                     } else if (callName === 'cerebras_browser_task') {
                       const args = call.args as any;
                       try {
-                        const systemMsg = `You are a web browser agent. Analyze the requested web task and provide detailed information based on your training data. For tasks requiring specific live website data, use your built-in web search knowledge to provide accurate, current information. Return structured results with clear sections.`;
-                        const content = await callCerebrasAPI([
-                          { role: 'system', content: systemMsg },
-                          { role: 'user', content: `Browser task:\n${args.task || ''}\n\nModel: ${args.model || 'gpt-oss-120b'}\n\nExecute this task thoroughly. If it involves searching for information, include relevant details, facts, and sources.` }
-                        ], { model: args.model === 'zai-glm-4.7' ? 'zai-glm-4.7' : 'gpt-oss-120b', temperature: 0.1, max_tokens: 4096 });
-                        result = { ok: true, result: content, model_used: args.model || 'gpt-oss-120b', generatedBy: 'cerebras' };
+                        const resp = await fetch('/api/cerebras/browser', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            task: args.task || '',
+                            model: args.model || 'gpt-oss-120b',
+                            timeout: args.timeout || 60,
+                          }),
+                        });
+                        const data = await resp.json();
+                        if (!resp.ok || data.ok === false) throw new Error(data.error || `Browser task error (${resp.status})`);
+                        result = { ok: true, result: data.result || data, model_used: args.model || 'gpt-oss-120b', generatedBy: 'cerebras' };
                       } catch (e: any) {
                         result = { ok: false, error: e.message || 'Cerebras browser task failed' };
                       }
@@ -4095,19 +4080,20 @@ ${historyContext}
                       try {
                         setGeneratedDocumentTask(generationTaskId, title, '', 'working');
 
-                        const templateRef = DOCUMENT_TEMPLATE_FILES
-                          .map(t => `  - ${t.filename}: ${t.description}`)
-                          .join('\n');
+                        const resp = await fetch('/api/sandbox/run', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            task_description: `Title: ${title}\n\nUser request: ${prompt}\n\nTemplate: ${args.templateName || 'proposal'}\n\nLanguage: ${authLanguage}\n\nGenerate a complete standalone HTML document.`,
+                            task_type: 'document',
+                            timeout: 120,
+                          }),
+                        });
+                        const data = await resp.json();
+                        if (!resp.ok || !data.ok) throw new Error(data.error || 'Document generation failed');
 
-                        const systemPrompt = `You are a senior document designer. Generate a complete standalone HTML document with embedded CSS and JavaScript. Use semantic structure, print styles, and responsive design. Start with <!DOCTYPE html>. Available templates for reference: ${templateRef}`;
-
-                        const content = await callCerebrasAPI([
-                          { role: 'system', content: systemPrompt },
-                          { role: 'user', content: `Title: ${title}\n\nUser request: ${prompt}\n\nTemplate: ${args.templateName || 'proposal'}\n\nLanguage: ${authLanguage}\n\nGenerate a complete standalone HTML document.` }
-                        ], { model: 'gpt-oss-120b', temperature: 0.25 });
-
-                        let html = content;
-                        try { html = extractHtmlArtifact(content); } catch {}
+                        let html = data.result;
+                        try { html = extractHtmlArtifact(html); } catch {}
 
                         setGeneratedDocumentTask(generationTaskId, title, html, 'done');
 
@@ -4135,7 +4121,7 @@ ${historyContext}
                           title,
                           content: html,
                           templateName: args.templateName || inferDocumentTemplate(title, prompt),
-                          generatedBy: 'cerebras',
+                          agent: data.agent || 'backend',
                         };
                       } catch (e: any) {
                         setGeneratedDocumentTask(generationTaskId, title, '', 'error');
@@ -4150,13 +4136,19 @@ ${historyContext}
                       const generationTaskId = crypto.randomUUID();
                       try {
                         setGeneratedDocumentTask(generationTaskId, title, '', 'working');
-                        const systemMsg = `You are a senior web developer. Generate a complete standalone HTML website with embedded CSS and JavaScript. The site must be production-quality, responsive, self-contained, and visually stunning. Use modern CSS (flexbox/grid, custom properties, smooth animations). Include semantic HTML5 structure. No external dependencies. Start with <!DOCTYPE html>. Return only the HTML.`;
-                        const content = await callCerebrasAPI([
-                          { role: 'system', content: systemMsg },
-                          { role: 'user', content: `Title: ${title}\n\nRequest: ${prompt}\n\nTemplate: ${args.template || 'landing'}\n\nGenerate a complete standalone HTML file.` }
-                        ], { model: 'gpt-oss-120b', temperature: 0.25 });
-                        let html = content;
-                        try { html = extractHtmlArtifact(content); } catch {}
+                        const resp = await fetch('/api/sandbox/run', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            task_description: `Title: ${title}\n\nRequest: ${prompt}\n\nTemplate: ${args.template || 'landing'}\n\nGenerate a complete standalone HTML file.`,
+                            task_type: 'website',
+                            timeout: 120,
+                          }),
+                        });
+                        const data = await resp.json();
+                        if (!resp.ok || !data.ok) throw new Error(data.error || 'Website generation failed');
+                        let html = data.result;
+                        try { html = extractHtmlArtifact(html); } catch {}
                         setGeneratedDocumentTask(generationTaskId, title, html, 'done');
                         const wsOutput = {
                           id: `web_${generationTaskId}`,
@@ -4169,7 +4161,7 @@ ${historyContext}
                           createdAt: new Date().toISOString(),
                         };
                         saveOutput(wsOutput).catch(() => {});
-                        result = { ok: true, title, content: html, template: args.template || 'landing', generatedBy: 'cerebras' };
+                        result = { ok: true, title, content: html, template: args.template || 'landing', agent: data.agent || 'backend' };
                       } catch (e: any) {
                         setGeneratedDocumentTask(generationTaskId, title, '', 'error');
                         result = { ok: false, error: e.message || 'Website generation failed' };
@@ -4177,11 +4169,18 @@ ${historyContext}
                     } else if (callName === 'cerebras_chat') {
                       const args = call.args as any;
                       try {
-                        const messages: { role: string; content: string }[] = [];
-                        if (args.system) messages.push({ role: 'system', content: args.system });
-                        messages.push({ role: 'user', content: args.prompt });
-                        const content = await callCerebrasAPI(messages, { model: 'gpt-oss-120b', temperature: 0.3 });
-                        result = { ok: true, content };
+                        const resp = await fetch('/api/sandbox/run', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            task_description: `System: ${args.system || ''}\n\nPrompt: ${args.prompt || ''}`,
+                            task_type: 'auto',
+                            timeout: 30,
+                          }),
+                        });
+                        const data = await resp.json();
+                        if (!resp.ok || !data.ok) throw new Error(data.error || 'Chat failed');
+                        result = { ok: true, content: data.result };
                       } catch (e: any) {
                         result = { ok: false, error: e.message || 'Cerebras chat failed' };
                       }

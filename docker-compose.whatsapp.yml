@@ -10,8 +10,8 @@ services:
       SANDBOX_PORT: "4200"
       WA_AUTH_ROOT: /data/baileys
       WA_LOG_LEVEL: ${WA_LOG_LEVEL:-silent}
-    ports:
-      - "${WHATSAPP_SERVER_PORT:-4200}:4200"
+      OLLAMA_BASE_URL: http://127.0.0.1:11434
+    network_mode: "host"
     volumes:
       - whatsapp_auth:/data/baileys
     restart: unless-stopped

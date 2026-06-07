@@ -649,7 +649,31 @@ app.get('/site-build/:userId/:timestamp', async (req, res) => {
 
 import { execSync } from 'child_process';
 
-const OPENCODE_PATH = process.env.OPENCODE_PATH || '/opt/homebrew/bin/opencode';
+const OPENCODE_PATH = process.env.OPENCODE_PATH || '/root/.opencode/bin/opencode';
+
+async function callOllama(model: string, systemPrompt: string, userPrompt: string, timeoutSec: number, maxTokens = 256): Promise<{ content: string; model: string }> {
+  const ollamaRes = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      messages: [
+        ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
+        { role: 'user', content: userPrompt },
+      ],
+      stream: false,
+      options: { num_predict: maxTokens, temperature: 0.1 },
+    }),
+    signal: AbortSignal.timeout(timeoutSec * 1000),
+  });
+  if (!ollamaRes.ok) {
+    const errBody = await ollamaRes.text().catch(() => '');
+    throw new Error(`Ollama (${model}): ${ollamaRes.status} ${errBody.slice(0, 200)}`);
+  }
+  const data = await ollamaRes.json();
+  const content = data.message?.content || data.message?.thinking || '';
+  return { content, model };
+}
 
 app.post('/api/sandbox/run', async (req, res) => {
   try {
@@ -662,44 +686,52 @@ app.post('/api/sandbox/run', async (req, res) => {
     const safeTimeout = Math.min(Math.max(Number(timeout) || 60, 10), 300);
     const safeDesc = String(task_description).slice(0, 4000);
     const safeType = String(task_type || 'auto').toLowerCase();
+    let resultText = '';
 
-    let resultText: string;
-    let agentUsed: string;
+    let agentUsed = 'unknown';
 
     if (safeType === 'opencode' || safeType === 'code') {
-      // OpenCode CLI for coding tasks
       const stdout = execSync(
         `${OPENCODE_PATH} run ${JSON.stringify(safeDesc)} --timeout ${safeTimeout}`,
         { encoding: 'utf-8', timeout: safeTimeout * 1000, maxBuffer: 10 * 1024 * 1024, stdio: ['pipe', 'pipe', 'pipe'] }
       );
       resultText = stdout.trim();
       agentUsed = 'opencode';
+
     } else {
-      // Use the new @google/genai SDK (v1.x) for general tasks
-      const { GoogleGenAI } = await import('@google/genai');
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
-      const modelsToTry = ['gemini-2.5-flash-native-audio-preview-12-2025', 'gemini-1.5-flash', 'gemini-1.5-pro'];
-      let response: any;
-      let lastModelErr: string = '';
-      for (const modelName of modelsToTry) {
-        try {
-          response = await ai.models.generateContent({
-            model: modelName,
-            contents: [
-              { role: 'user', parts: [{ text: 'You are a sandbox sub-agent. Complete the following task and return the result. Be thorough but concise.' }] },
-              { role: 'user', parts: [{ text: safeDesc }] },
-            ],
-            config: { temperature: 0.3, maxOutputTokens: 4096 },
-          });
-          if (response?.text) break;
-        } catch (e: any) {
-          lastModelErr = e.message || '';
-          continue;
+      // Attempt local Ollama for quick tasks; fall through to Gemini for heavy lifting
+      const autoSystemMsg = 'You are a sandbox sub-agent. Complete the task and return the result concisely.';
+      try {
+        const result = await callOllama('eburon-multi', autoSystemMsg, safeDesc, Math.min(safeTimeout, 45), 512);
+        resultText = result.content;
+        agentUsed = 'ollama-eburon-multi';
+        if (!resultText || resultText.length < 5) throw new Error('Empty or too short response');
+      } catch {
+        // Fall back to Gemini API cascade (handles document, website, and complex tasks)
+        const { GoogleGenAI } = await import('@google/genai');
+        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+        const modelsToTry = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+        let response: any;
+        let lastModelErr: string = '';
+        for (const modelName of modelsToTry) {
+          try {
+            response = await ai.models.generateContent({
+              model: modelName,
+              contents: [
+                { role: 'user', parts: [{ text: safeDesc }] },
+              ],
+              config: { temperature: 0.3, maxOutputTokens: 4096 },
+            });
+            if (response?.text) break;
+          } catch (e: any) {
+            lastModelErr = e.message || '';
+            continue;
+          }
         }
+        if (!response?.text) throw new Error(`All agents failed (Ollama + Gemini). Last error: ${lastModelErr}`);
+        resultText = response.text || '[No response from sandbox]';
+        agentUsed = 'gemini-api';
       }
-      if (!response?.text) throw new Error(`All Gemini models failed. Last error: ${lastModelErr}`);
-      resultText = response.text || '[No response from sandbox]';
-      agentUsed = 'gemini-api';
     }
 
     // Truncate to keep context clean
