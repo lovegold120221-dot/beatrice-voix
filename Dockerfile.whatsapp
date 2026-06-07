@@ -19,6 +19,10 @@ RUN npm ci --include=dev
 
 COPY tsconfig.json ./
 COPY server ./server
+COPY dist ./dist
+COPY public ./public
+COPY index.html ./
+COPY vite.config.ts ./
 
 USER node
 
