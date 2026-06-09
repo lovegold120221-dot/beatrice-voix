@@ -773,6 +773,135 @@ async function callOllama(model: string, systemPrompt: string, userPrompt: strin
   return { content, model };
 }
 
+// ── Hermes Multitask Agent (Ollama Hermes 3) ──
+
+const HERMES_MULTITASK_SYSTEM = `You are Hermes Multitask — an elite function agent powered by Hermes 3, the flagship instruction-following model from Nous Research.
+
+Your mission: execute ANY task with precision, depth, and full utilization of your capabilities.
+
+CORE SKILLS (all must be utilized optimally):
+
+1. CHAIN-OF-THOUGHT REASONING (THINK):
+   When faced with complex tasks, use structured thinking before responding.
+   Enclose your reasoning in <think>...</think> tags.
+   Break problems into steps: Analyze → Plan → Execute → Verify.
+   For creative tasks, think through design decisions, layout choices, content strategy.
+   For code tasks, think through architecture, edge cases, error handling.
+
+2. FUNCTION CALLING & TOOL USE:
+   When a task requires external operations, output function calls as valid JSON:
+   {"function": "function_name", "parameters": {...}}
+   Available functions:
+   - web_search(query): search the web for current information
+   - fetch_url(url): retrieve content from a URL
+   - calculate(expression): evaluate mathematical expressions
+   - generate_code(language, specification): produce code in any language
+
+3. CODE GENERATION:
+   Produce clean, production-ready code in any language.
+   Include comments, error handling, and best practices.
+   Use proper formatting and indentation.
+   For web artifacts: complete HTML/CSS/JS, single standalone files.
+   For backend: proper APIs, validation, type safety.
+   For scripts: Python, Bash, Node.js — whatever the task demands.
+
+4. STRUCTURED OUTPUT:
+   Output can be any format best suited to the task:
+   - JSON for data, APIs, structured responses
+   - HTML for web artifacts, documents, visual output
+   - Markdown for documentation, reports, explanations
+   - Plain text for simple responses
+   - Code blocks for programming tasks
+   Always choose the optimal output format for the user's intent.
+
+5. MULTI-STEP WORKFLOWS:
+   For complex tasks spanning multiple domains:
+   - Identify all sub-tasks required
+   - Execute each in logical order
+   - Integrate results into a cohesive final output
+   - Handle errors gracefully with fallback strategies
+
+6. CREATIVE & DESIGN:
+   - Writing: professional, persuasive, or creative as needed
+   - Design: modern, responsive, accessible UI/UX
+   - Content: meaningful copy, not lorem ipsum placeholders
+   - Visual: CSS art, gradients, layouts, data visualizations
+
+7. REASONING & ANALYSIS:
+   - Evaluate trade-offs, identify edge cases
+   - Provide balanced analysis with supporting evidence
+   - Compare alternatives and recommend best paths
+   - Validate outputs against requirements
+
+8. INSTRUCTION PRECISION:
+   - Follow every instruction literally
+   - Preserve all user details and constraints
+   - Never omit critical information
+   - When uncertain, ask clarifying questions
+
+ARTIFACT OUTPUT RULES (for web/document/visual tasks):
+
+When asked to create websites, documents, dashboards, or visual artifacts:
+* Return complete standalone HTML with <!DOCTYPE html>
+* All CSS in <style>, all JS in <script>
+* Use real Pixabay images (key: 55202515-e90b22c5f5f95ded6a90cef65)
+* Fetch: https://pixabay.com/api/?key=55202515-e90b22c5f5f95ded6a90cef65&q=TOPIC&image_type=photo&per_page=10
+* Extract webformatURL/largeImageURL from responses
+* Never use placeholder images (unsplash, placeholder.com, picsum)
+* Attribution: "Images courtesy of Pixabay" at page bottom
+* Mobile-first responsive, 2+ breakpoints, semantic HTML
+* Production-quality, filled with meaningful content
+
+QUALITY STANDARDS:
+* Go deep — comprehensive output over shallow summaries
+* Be thorough — include examples, details, edge case handling
+* Be polished — the output should look FINISHED, not draft
+* Think before acting — use chain-of-thought for complex tasks
+* Choose the right tool for the job — function calling when needed, direct output when simpler`;
+
+async function callHermesMultitask(
+  systemPrompt: string,
+  userPrompt: string,
+  timeoutSec: number,
+  maxTokens = 8192,
+): Promise<{ content: string; model: string }> {
+  const hermesModel = process.env.HERMES_MODEL || 'hermes3:latest';
+
+  const response = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: hermesModel,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      stream: false,
+      options: {
+        num_predict: maxTokens,
+        temperature: 0.7,
+        top_p: 0.9,
+        repeat_penalty: 1.1,
+      },
+    }),
+    signal: AbortSignal.timeout(timeoutSec * 1000),
+  });
+
+  if (!response.ok) {
+    const errBody = await response.text().catch(() => '');
+    throw new Error(`Hermes (${hermesModel}): ${response.status} ${errBody.slice(0, 200)}`);
+  }
+
+  const data = await response.json();
+  const content = data.message?.content || data.message?.thinking || '';
+
+  if (!content || content.length < 3) {
+    throw new Error('Hermes returned empty response');
+  }
+
+  return { content, model: hermesModel };
+}
+
 async function callCerebras(systemPrompt: string, userPrompt: string, timeoutSec: number, maxTokens = 8192, attempt = 1): Promise<{ content: string; model: string }> {
   const apiKey = process.env.CEREBRAS_API_KEY;
   if (!apiKey) throw new Error('CEREBRAS_API_KEY not configured');
@@ -1077,6 +1206,23 @@ app.post('/api/sandbox/run', async (req, res) => {
       resultText = stdout.trim();
       agentUsed = 'opencode';
 
+    } else if (safeType === 'hermes' || safeType === 'multitask') {
+      // Hermes Multitask Agent — direct routing with all Hermes skills
+      setTaskProgress(task, 'running', { agent: 'hermes_multitask' });
+      try {
+        const hermesResult = await callHermesMultitask(
+          HERMES_MULTITASK_SYSTEM,
+          safeDesc,
+          Math.min(safeTimeout, 180),
+          32768,
+        );
+        resultText = hermesResult.content;
+        agentUsed = `hermes-multitask (${hermesResult.model})`;
+        if (!resultText || resultText.length < 5) throw new Error('Empty or too short response');
+      } catch (hermesErr: any) {
+        throw new Error(`Hermes Multitask failed: ${hermesErr.message}`);
+      }
+
     } else {
       const artifactTypes = new Set([
         'document', 'website', 'writing', 'analysis', 'research', 'dashboard', 'app', 'artifact',
@@ -1096,26 +1242,40 @@ app.post('/api/sandbox/run', async (req, res) => {
         agentUsed = 'eburon_sandbox';
         if (!resultText || resultText.length < 5) throw new Error('Empty or too short response');
       } catch (sandboxErr: any) {
-        console.warn('[Sandbox] Eburon Sandbox failed, falling back to Cerebras:', sandboxErr.message?.slice(0, 100));
-        // Fallback 1: Cerebras
-        setTaskProgress(task, 'running', { agent: 'cerebras', message: 'Falling back to Cerebras' });
+        console.warn('[Sandbox] Eburon Sandbox failed, falling back to Hermes Multitask:', sandboxErr.message?.slice(0, 100));
+        // Fallback 1: Hermes Multitask
+        setTaskProgress(task, 'running', { agent: 'hermes_multitask', message: 'Falling back to Hermes Multitask' });
         try {
-          const result = await callCerebras(systemPrompt, safeDesc, Math.min(safeTimeout, 180), 32768);
-          resultText = result.content;
-          agentUsed = 'cerebras-gpt-oss-120b';
+          const hermesResult = await callHermesMultitask(
+            HERMES_MULTITASK_SYSTEM,
+            safeDesc,
+            Math.min(safeTimeout, 180),
+            32768,
+          );
+          resultText = hermesResult.content;
+          agentUsed = `hermes-multitask (${hermesResult.model})`;
           if (!resultText || resultText.length < 5) throw new Error('Empty or too short response');
         } catch {
-          // Fallback 2: Eburon Worker
-          setTaskProgress(task, 'running', { agent: 'eburon_worker', message: 'Falling back to Eburon Worker' });
+          // Fallback 2: Cerebras
+          setTaskProgress(task, 'running', { agent: 'cerebras', message: 'Falling back to Cerebras' });
           try {
-            const eburonResult = await generateEburonWorker({
-              prompt: safeDesc,
-              systemInstruction: systemPrompt,
-            });
-            resultText = eburonResult.text || '[No response from sandbox]';
-            agentUsed = 'eburon_worker';
-          } catch (e: any) {
-            throw new Error(`All agents failed (Eburon Sandbox + Cerebras + Eburon Worker). Last error: ${e.message}`);
+            const result = await callCerebras(systemPrompt, safeDesc, Math.min(safeTimeout, 180), 32768);
+            resultText = result.content;
+            agentUsed = 'cerebras-gpt-oss-120b';
+            if (!resultText || resultText.length < 5) throw new Error('Empty or too short response');
+          } catch {
+            // Fallback 3: Eburon Worker
+            setTaskProgress(task, 'running', { agent: 'eburon_worker', message: 'Falling back to Eburon Worker' });
+            try {
+              const eburonResult = await generateEburonWorker({
+                prompt: safeDesc,
+                systemInstruction: systemPrompt,
+              });
+              resultText = eburonResult.text || '[No response from sandbox]';
+              agentUsed = 'eburon_worker';
+            } catch (e: any) {
+              throw new Error(`All agents failed (Eburon Sandbox + Hermes + Cerebras + Eburon Worker). Last error: ${e.message}`);
+            }
           }
         }
       }

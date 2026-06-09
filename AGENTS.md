@@ -53,7 +53,7 @@ npm run check:eburon-branding   # Validate no upstream provider branding
 | Component | Responsibility |
 |---|---|
 | `src/components/BeatriceAgent.tsx` | ~280KB monolith: agent engine, Live API session, tools, audio, UI |
-| `server/index.ts` | Express API: WhatsApp, Belgian tools, sandbox, Cerebras, Ollama proxy, website builder, Eburon endpoints |
+| `server/index.ts` | Express API: WhatsApp, Belgian tools, sandbox (multi-agent with Hermes), Cerebras, Ollama proxy, website builder, Eburon endpoints |
 | `server/eburon-provider.ts` | Eburon Core provider: model registry, whitelist, AI call routing, token generation |
 | `server/whatsapp.ts` | WhatsAppManager (Baileys) |
 | `server/belgian-tools.ts` | 10 Belgian admin tool endpoints |
@@ -69,7 +69,7 @@ npm run check:eburon-branding   # Validate no upstream provider branding
 | `GET/POST /api/whatsapp/*` | Pairing, messages, send, stream, webhook, admin |
 | `GET /api/whatsapp/stream/:userId` | SSE real-time message stream |
 | `POST /api/web/glance` | DuckDuckGo web search |
-| `POST /api/sandbox/run` | Sub-agent runner (Eburon Sandbox → Cerebras → Eburon Worker fallback chain) |
+| `POST /api/sandbox/run` | Sub-agent runner (Eburon Sandbox → Hermes Multitask → Cerebras → Eburon Worker fallback chain). `task_type=hermes` routes directly to Hermes 3 via Ollama. |
 | `POST /api/cerebras/browser` | Browser-Use + Cerebras automation |
 | `POST /api/ollama/generate` | Ollama LLM proxy (SSE streaming) |
 | `POST /api/website/generate` | Web Architect (Eburon Worker) |
