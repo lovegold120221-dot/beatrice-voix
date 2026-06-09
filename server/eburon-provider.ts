@@ -11,14 +11,24 @@ const _m2 = String.fromCharCode(103, 101, 109, 105, 110, 105, 45, 50, 46, 53, 45
 const _mv = String.fromCharCode(103, 101, 109, 105, 110, 105, 45, 50, 46, 53, 45, 102, 108, 97, 115, 104, 45, 118, 105, 115, 105, 111, 110, 45, 108, 97, 116, 101, 115, 116);
 const _mw = String.fromCharCode(103, 101, 109, 105, 110, 105, 45, 50, 46, 48, 45, 102, 108, 97, 115, 104, 45, 101, 120, 112);
 const _ms = String.fromCharCode(103, 101, 109, 105, 110, 105, 45, 51, 46, 49, 45, 102, 108, 97, 115, 104, 45, 108, 105, 116, 101);
+const _mf = String.fromCharCode(103, 101, 109, 105, 110, 105, 45, 50, 46, 48, 45, 102, 108, 97, 115, 104);
+const _mfl = String.fromCharCode(103, 101, 109, 105, 110, 105, 45, 50, 46, 48, 45, 102, 108, 97, 115, 104, 45, 108, 105, 116, 101);
+const _g4a = String.fromCharCode(103, 101, 109, 109, 97, 45, 52, 45, 50, 54, 98, 45, 105, 116);
+const _g4b = String.fromCharCode(103, 101, 109, 109, 97, 45, 52, 45, 51, 49, 98, 45, 105, 116);
 
 const EBURON_MODEL_REGISTRY: Record<string, string | undefined> = {
   eburon_text: process.env.EBURON_TEXT_MODEL_ID_INTERNAL || _m2,
   eburon_realtime_voice: process.env.EBURON_VOICE_MODEL_ID_INTERNAL || _m,
   eburon_vision: process.env.EBURON_VISION_MODEL_ID_INTERNAL || _mv,
   eburon_worker: process.env.EBURON_WORKER_MODEL_ID_INTERNAL || _mw,
-  eburon_sandbox: process.env.EBURON_SANDBOX_MODEL_ID_INTERNAL || _ms,
+  eburon_sandbox: process.env.EBURON_SANDBOX_MODEL_ID_INTERNAL || _mf,
+  eburon_gemma_4_26b: process.env.EBURON_GEMMA_4_26B_MODEL_ID_INTERNAL || _g4a,
+  eburon_gemma_4_31b: process.env.EBURON_GEMMA_4_31B_MODEL_ID_INTERNAL || _g4b,
+  eburon_sandbox_free_fast: process.env.EBURON_SANDBOX_FREE_FAST_MODEL_ID_INTERNAL || _mfl,
 };
+
+let _sandboxModelIndex = 0;
+const _SANDBOX_MODELS = ['eburon_sandbox', 'eburon_sandbox_free_fast', 'eburon_gemma_4_26b', 'eburon_gemma_4_31b'];
 
 // ── Whitelists ──
 const EBURON_ALLOWED_PROVIDERS = ['eburon_core'];
@@ -29,6 +39,9 @@ const EBURON_ALLOWED_MODELS = [
   'eburon_vision',
   'eburon_worker',
   'eburon_sandbox',
+  'eburon_gemma_4_26b',
+  'eburon_gemma_4_31b',
+  'eburon_sandbox_free_fast',
 ];
 
 // ── Internal client (initialized once) ──
@@ -205,6 +218,14 @@ export function createEburonWorkerClient(): {
 }
 
 // ── Eburon Sandbox (streaming model with thinking + tools) ──
+// Alternates between eburon_sandbox, eburon_gemma_4_26b, eburon_gemma_4_31b
+
+export function getNextSandboxModel(): { modelAlias: string; modelId: string } {
+  const alias = _SANDBOX_MODELS[_sandboxModelIndex % _SANDBOX_MODELS.length];
+  _sandboxModelIndex++;
+  const modelId = resolveEburonModelAlias(alias);
+  return { modelAlias: alias, modelId };
+}
 
 export async function generateEburonSandbox(params: {
   prompt: string;
@@ -212,8 +233,6 @@ export async function generateEburonSandbox(params: {
   timeoutSec?: number;
   maxOutputTokens?: number;
 }): Promise<{ text: string; modelId: string }> {
-  const modelAlias = 'eburon_sandbox';
-  const modelId = resolveEburonModelAlias(modelAlias);
   const apiKey = process.env.EBURON_CORE_KEY;
   if (!apiKey) throw new Error('[Eburon] EBURON_CORE_KEY not configured for sandbox');
 
@@ -242,13 +261,14 @@ export async function generateEburonSandbox(params: {
   };
 
   const timeoutSec = Math.min(params.timeoutSec ?? 180, 300);
-  const maxRetries = 3;
+  const maxAttempts = 5;
   let lastError: Error | null = null;
 
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const { modelAlias, modelId } = getNextSandboxModel();
     if (attempt > 0) {
       const delay = Math.min(1000 * Math.pow(2, attempt), 15000);
-      console.warn(`[Eburon Sandbox] Retry ${attempt}/${maxRetries} after ${delay}ms`);
+      console.warn(`[Eburon Sandbox] Attempt ${attempt + 1}/${maxAttempts} model=${modelAlias} after ${delay}ms`);
       await new Promise(r => setTimeout(r, delay));
     }
 
@@ -271,7 +291,7 @@ export async function generateEburonSandbox(params: {
       if (!res.ok) {
         const errBody = await res.text().catch(() => '');
         console.error(`[Eburon Sandbox] HTTP ${res.status}: ${errBody.slice(0, 300)}`);
-        if (res.status === 429 && attempt < maxRetries - 1) {
+        if (res.status === 429 && attempt < maxAttempts - 1) {
           lastError = new Error(`[Eburon Sandbox] HTTP ${res.status}`);
           continue;
         }
@@ -309,7 +329,7 @@ export async function generateEburonSandbox(params: {
       if (err.name === 'AbortError') {
         throw new Error(`[Eburon Sandbox] Timed out after ${timeoutSec}s`);
       }
-      if (err.message?.startsWith('[Eburon Sandbox] HTTP 429') && attempt < maxRetries - 1) {
+      if (err.message?.startsWith('[Eburon Sandbox] HTTP 429') && attempt < maxAttempts - 1) {
         lastError = err;
         continue;
       }
@@ -319,7 +339,7 @@ export async function generateEburonSandbox(params: {
     }
   }
 
-  throw lastError || new Error(`[Eburon Sandbox] All ${maxRetries} attempts failed`);
+  throw lastError || new Error(`[Eburon Sandbox] All ${maxAttempts} attempts failed`);
 }
 
 // ── Startup validation ──

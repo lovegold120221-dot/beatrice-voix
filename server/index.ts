@@ -140,7 +140,7 @@ app.get('/api/eburon/provider', async (_req, res) => {
       provider: 'eburon_core',
       configured: hasKey,
       defaultModel: 'eburon_text',
-      models: ['eburon_text', 'eburon_realtime_voice', 'eburon_vision', 'eburon_worker'],
+      models: ['eburon_text', 'eburon_realtime_voice', 'eburon_vision', 'eburon_worker', 'eburon_sandbox', 'eburon_gemma_4_26b', 'eburon_gemma_4_31b', 'eburon_sandbox_free_fast'],
     });
   } catch (err: any) {
     res.status(500).json({ error: 'Failed to get provider info' });
