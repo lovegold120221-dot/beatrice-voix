@@ -188,7 +188,7 @@ export function VideoPage({
             sendVideoToLive(base64Data);
           }
         }
-      }, 300);
+      }, 1000);
     } catch (err) {
       console.error('Screen sharing error:', err);
     }

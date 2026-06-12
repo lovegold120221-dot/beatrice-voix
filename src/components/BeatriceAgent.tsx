@@ -1153,8 +1153,12 @@ export function BeatriceAgent({
     const session = sessionRef.current;
     if (!session || !text.trim() || !isActiveRef.current || !sessionHealthyRef.current) return;
     try {
-      if (typeof session.sendRealtimeInput === 'function') {
-        session.sendRealtimeInput({ text });
+      if (typeof (session as any).sendRealtimeInput === 'function') {
+        (session as any).sendRealtimeInput({ text });
+      } else if (typeof (session as any).send === 'function') {
+        (session as any).send({
+          realtimeInput: { text }
+        });
       }
     } catch {} // Silently skip if session is closing
   };
@@ -1167,9 +1171,17 @@ export function BeatriceAgent({
     const session = sessionRef.current;
     if (!session || !base64Data || !isActiveRef.current || !sessionHealthyRef.current) return;
     try {
-      if (typeof session.sendRealtimeInput === 'function') {
-        session.sendRealtimeInput({
+      if (typeof (session as any).sendRealtimeInput === 'function') {
+        (session as any).sendRealtimeInput({
           audio: { data: base64Data, mimeType: 'audio/pcm;rate=16000' }
+        });
+      } else if (typeof (session as any).send === 'function') {
+        (session as any).send({
+          realtimeInput: {
+            mediaChunks: [
+              { data: base64Data, mimeType: 'audio/pcm;rate=16000' }
+            ]
+          }
         });
       }
     } catch {} // Silently skip if session is closing
@@ -1179,9 +1191,17 @@ export function BeatriceAgent({
     const session = sessionRef.current;
     if (!session || !base64Data || !isActiveRef.current || !sessionHealthyRef.current) return;
     try {
-      if (typeof session.sendRealtimeInput === 'function') {
-        session.sendRealtimeInput({
+      if (typeof (session as any).sendRealtimeInput === 'function') {
+        (session as any).sendRealtimeInput({
           video: { data: base64Data, mimeType: 'image/jpeg' }
+        });
+      } else if (typeof (session as any).send === 'function') {
+        (session as any).send({
+          realtimeInput: {
+            mediaChunks: [
+              { data: base64Data, mimeType: 'image/jpeg' }
+            ]
+          }
         });
       }
     } catch {} // Silently skip if session is closing
@@ -1221,7 +1241,7 @@ export function BeatriceAgent({
       setIsCameraActive(true);
 
       videoIntervalRef.current = setInterval(() => {
-        if (!sessionRef.current || !videoRef.current || !canvasRef.current || !isActive) return;
+        if (!sessionRef.current || !videoRef.current || !canvasRef.current || !isActiveRef.current) return;
         if (screenShareActiveRef.current) return;
 
         const video = videoRef.current;
@@ -1243,7 +1263,7 @@ export function BeatriceAgent({
         }
       }, 1000);
 
-      sendTextToLive("The user just turned on their camera. You can now see them. React naturally - greet them like you're on a video call. Make eye contact references, comment on what you see casually, keep it warm and human.");
+      sendTextToLive("[SYSTEM: The user just turned on their camera. You can now see them in real-time. Use your vision capability to react naturally to what you observe. Do not use generic greetings — comment on their environment, appearance, or actions if relevant and appropriate. Keep it warm and human.]");
     } catch (err) {
       console.error("Camera error:", err);
     }
