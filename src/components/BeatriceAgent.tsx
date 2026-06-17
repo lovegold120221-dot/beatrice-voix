@@ -238,7 +238,7 @@ If the user says "Show me my chats" or "What did [Name] say?":
 2. **FETCH DATA:** Call getMessageHistory (for a specific person) or readChats (for the inbox).
 3. **RENDER IN SANDBOX:** YOU MUST use the generate_document tool (or the Sandbox UI tool) to present this data. 
    - **MANDATORY:** Rewrite the JSON into a beautiful, human-readable HTML chat log.
-   - Change fromMe: true to "Me".
+   - Change fromMe: true to "You (the Boss)".
    - Change fromMe: false to the contact's name.
    - Strip all timestamps and metadata into a clean "Date | Name: Message" format.
    - NEVER show JIDs like "1234@s.whatsapp.net" or raw numbers unless specifically asked.
@@ -1312,7 +1312,7 @@ export function BeatriceAgent({
         }
       }, 1000);
 
-      sendTextToLive("[SYSTEM: The user just turned on their camera. You can now see them in real-time. Use your vision capability to react naturally to what you observe. Do not use generic greetings — comment on their environment, appearance, or actions if relevant and appropriate. Keep it warm and human.]");
+      sendTextToLive("[SYSTEM: The user just turned on their camera. You can now see them in real-time. CRITICAL: Only describe what you ACTUALLY see in the camera feed. Do NOT guess, assume, hallucinate, or make up details. If the feed is unclear, dark, or empty, say so honestly. React naturally to what you observe — their environment, appearance, actions — but ONLY what is visibly present. Keep it warm and human.]");
     } catch (err) {
       console.error("Camera error:", err);
     }
@@ -1696,16 +1696,41 @@ export function BeatriceAgent({
         }).join('');
         finalHtml = `<h1>💬 WhatsApp Conversations</h1><p style="font-size:12px; color:#64748b; margin-bottom:20px;">Recent chat activity from your paired device.</p>${rows || '<p style="text-align:center; padding:40px; color:#64748b;">No active conversations found.</p>'}`;
       } else if (data.messages) {
-        const rows = [...data.messages].reverse().map((m: any) => {
-          const senderName = m.fromMe ? 'Me' : (m.fromName || m.pushName || (m.from || '').split('@')[0] || 'Contact');
-          return `
-          <div class="wa-chat-row ${m.fromMe ? 'me' : 'them'}">
-            <div class="wa-chat-name">${senderName}</div>
-            <div class="wa-chat-bubble">${m.body}</div>
-            <div style="font-size:9px; color:#64748b; margin-top:2px; font-weight:500;">${new Date(m.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</div>
+          const rows = [...data.messages].reverse().map((m: any) => {
+            const isMe = m.fromMe === true;
+            const senderName = isMe ? 'You' : (m.fromName || m.pushName || (m.from || '').split('@')[0] || 'Contact');
+            const time = new Date(m.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+            const date = new Date(m.timestamp).toLocaleDateString([], {month:'short', day:'numeric'});
+            const mediaIndicator = m.isMedia ? `<span style="font-size:10px; color:#64748b; margin-left:8px;">📎 ${m.mediaType || 'file'}${m.mediaFileName ? ` · ${m.mediaFileName}` : ''}</span>` : '';
+            
+            if (isMe) {
+              return `
+              <div class="wa-chat-row me" style="display:flex; flex-direction:column; align-items:flex-end; margin:8px 0; max-width:75%;">
+                <div class="wa-chat-bubble" style="background:#005c4b; color:#fff; padding:10px 14px; border-radius:18px 18px 0 18px; max-width:100%; word-wrap:break-word; box-shadow:0 1px 2px rgba(0,0,0,0.1);">
+                  ${m.body || ''}
+                  ${mediaIndicator}
+                </div>
+                <div style="font-size:10px; color:#8696a0; margin-top:3px; margin-right:4px;">${time} · ${date} ✓✓</div>
+              </div>`;
+            } else {
+              return `
+              <div class="wa-chat-row them" style="display:flex; flex-direction:column; align-items:flex-start; margin:8px 0; max-width:75%;">
+                <div class="wa-chat-name" style="font-size:11px; color:#8696a0; margin-bottom:2px; margin-left:4px; font-weight:600;">${senderName}</div>
+                <div class="wa-chat-bubble" style="background:#202c33; color:#e9edef; padding:10px 14px; border-radius:18px 18px 18px 0; max-width:100%; word-wrap:break-word; box-shadow:0 1px 2px rgba(0,0,0,0.1);">
+                  ${m.body || ''}
+                  ${mediaIndicator}
+                </div>
+                <div style="font-size:10px; color:#8696a0; margin-top:3px; margin-left:4px;">${time} · ${date}</div>
+              </div>`;
+            }
+          }).join('');
+          finalHtml = `<div style="background:#0b141a; border-radius:16px; padding:20px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+            <div style="border-bottom:1px solid #1f2c34; padding-bottom:12px; margin-bottom:16px;">
+              <h1 style="margin:0; font-size:18px; color:#e9edef;">📜 Message History</h1>
+              <p style="margin:6px 0 0; font-size:12px; color:#8696a0;">Reviewing last ${data.messages.length} messages — <strong style="color:#00a884;">green bubbles = You (the Boss)</strong>, <strong style="color:#8696a0;">gray bubbles = others</strong></p>
+            </div>
+            <div style="display:flex; flex-direction:column; align-items:center;">${rows || '<p style="text-align:center; padding:40px; color:#64748b;">No history available.</p>'}</div>
           </div>`;
-        }).join('');
-        finalHtml = `<h1>📜 Message History</h1><p style="font-size:12px; color:#64748b; margin-bottom:20px;">Reviewing last ${data.messages.length} messages.</p><div style="padding:10px 0;">${rows || '<p style="text-align:center; padding:40px; color:#64748b;">No history available.</p>'}</div>`;
       } else if (data.contacts || ((toolName === 'whatsapp_action' || toolName === 'get_whatsapp_contacts') && result.result?.contacts)) {
         const list = data.contacts || result.result?.contacts || [];
         const rows = list.map((c: any) => {
@@ -2652,8 +2677,31 @@ ${censorshipEnabled
 CURRENT USER TIME CONTEXT:
 ${dynamicTimeBlock}
 
-DYNAMIC INTRODUCTION STRATEGY:
-When you first connect or reconnect, you MUST reference recent conversation history to maintain continuity. If there are past USER/ASSISTANT messages in the context above, acknowledge the last conversation naturally before starting anything new. The user should feel like you never left — you know exactly what you were discussing. If it's a brand new session with no history, greet naturally based on the time of day.
+DYNAMIC INTRODUCTION STRATEGY — SESSION CONTINUITY AWARENESS:
+You have FULL SESSION CONTEXT in the system prompt above, including:
+- **last_interaction_at**: exact timestamp of the last conversation
+- **time_elapsed_since_last_interaction**: human-readable gap (e.g., "2 hours ago", "3 days ago")
+- **PAST_SESSION_SUMMARIES**: archived sessions with start/end timestamps
+- **LATEST_CONVERSATION_HISTORY**: last 50 messages with timestamps
+
+USE THIS TO DECIDE HOW TO OPEN:
+
+**If time_elapsed_since_last_interaction is under 1 hour (session likely cut off):**
+- Do NOT greet. Do NOT say "Hello" or "Hi there."
+- Acknowledge the continuity immediately: "Right, we were talking about [topic]..." or "Back to [topic] — where were we?"
+- Reference the specific last topic/message naturally.
+- The user should feel you never left.
+
+**If time_elapsed_since_last_interaction is 1 hour to 24 hours:**
+- Brief warm acknowledgment: "Good [morning/afternoon/evening]. Last we spoke [time_ago] about [topic]."
+- Pick up naturally from the last conversation thread.
+
+**If time_elapsed_since_last_interaction is over 24 hours or "no previous conversation":**
+- Greet naturally based on time of day (from CURRENT_USER_TIME_CONTEXT).
+- If there are PAST_SESSION_SUMMARIES, briefly reference them: "Welcome back. Last session was [date] — we covered [summary]."
+- If truly brand new (no history at all), give a warm first-time welcome.
+
+**NEVER use generic greetings like "Hello! How can I help you today?" — you have the context, use it.**
 
 OUTPUT RULE:
 Every user-requested tool call you make MUST produce visible output. Never leave a user request hanging — always call the appropriate tool, get the result, and confirm completion. If a tool fails, say so clearly and try an alternative.
@@ -2678,7 +2726,11 @@ WHATSAPP OWNER IDENTITY & ADDRESSING RULES:
 - When Beatrice sends a WhatsApp message (via sendMessage or sendGroupMessage), you MUST always specify the recipient using their full WhatsApp JID in the format: <digits>@s.whatsapp.net for personal chats or <digits>@g.us for groups.
 - IMPORTANT: Never omit the country code. Always use the full international number (without +) as the JID prefix.
 - The getContacts tool returns contacts with TWO name fields: 'name' (saved name) and 'notify' (public push name). Always show BOTH.
-- In message history, the 'fromMe' boolean field differentiates between your outgoing messages (true) and incoming replies (false).
+- **MESSAGE OWNERSHIP — CRITICAL:** In message history, the 'fromMe' boolean field tells you exactly who sent each message:
+  - fromMe: true = YOU (the Boss) sent this message → GREEN BUBBLE, right-aligned, show "You" as sender
+  - fromMe: false = OTHER PERSON sent this message → GRAY BUBBLE, left-aligned, show their name as sender
+  - NEVER confuse these. NEVER say "Me" — always say "You" for your own outgoing messages.
+  - When presenting history: visually match WhatsApp — your messages on the right (green), theirs on the left (gray/white).
 
 WHATSAPP WORKER SOP (STANDARD OPERATING PROCEDURE):
 You are an autonomous administrative worker. When a request involves WhatsApp at all, follow this strict protocol:

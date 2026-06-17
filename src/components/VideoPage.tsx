@@ -141,7 +141,7 @@ export function VideoPage({
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: { displaySurface: 'monitor' },
-        audio: false,
+        audio: true,
       });
       screenStreamRef.current = stream;
 
