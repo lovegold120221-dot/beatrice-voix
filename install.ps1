@@ -21,8 +21,8 @@ function Write-Fail($msg)  { Write-Host "✗ $msg" -ForegroundColor Red; exit 1 
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) { Write-Fail "Run PowerShell as Administrator to install all dependencies." }
 
-# ─── STEP 1/11: Install Chocolatey if missing ────────────────────────────────
-Write-Step "── STEP 1/11: Chocolatey package manager ──"
+# ─── STEP 1/14: Install Chocolatey if missing ────────────────────────────────
+Write-Step "── STEP 1/14: Chocolatey package manager ──"
 if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
   Set-ExecutionPolicy Bypass -Scope Process -Force
   [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
@@ -31,9 +31,9 @@ if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
 }
 Write-OK "Chocolatey ready"
 
-# ─── STEP 2/11: System packages (Git, Python, Node.js, build tools) ─────────
-Write-Step "── STEP 2/11: Git, Python 3.11, Node.js, Visual Studio Build Tools ──"
-choco install -y git python311 nodejs-lts visualstudio2022buildtools 2>&1 | Out-Host
+# ─── STEP 2/14: System packages (Git, Python, Node.js, build tools) ─────────
+Write-Step "── STEP 2/14: Git, Python 3.11, Node.js, Visual Studio Build Tools ──"
+choco install -y git python311 nodejs-lts visualstudio2022buildtools postgresql ffmpeg 2>&1 | Out-Host
 $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
 
 foreach ($cmd in @("git", "python", "node", "npm")) {
@@ -41,8 +41,8 @@ foreach ($cmd in @("git", "python", "node", "npm")) {
 }
 Write-OK "Node.js $(node -v), Python $(python --version), Git $(git --version)"
 
-# ─── STEP 3/11: Docker Desktop (container runtime + compose) ───────────────
-Write-Step "── STEP 3/11: Docker Desktop ──"
+# ─── STEP 3/14: Docker Desktop (container runtime + compose) ───────────────
+Write-Step "── STEP 3/14: Docker Desktop ──"
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
   choco install -y docker-desktop 2>&1 | Out-Host
   $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
@@ -51,8 +51,26 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
   Write-OK "Docker already installed: $(docker --version)"
 }
 
-# ─── STEP 4/11: Clone or update repository ──────────────────────────────────
-Write-Step "── STEP 4/11: Clone or update repository ──"
+# ─── STEP 4/14: PostgreSQL client for Supabase migrations ───────────────────
+Write-Step "── STEP 4/14: PostgreSQL client ──"
+if (Get-Command psql -ErrorAction SilentlyContinue) {
+  Write-OK "PostgreSQL client already present"
+} else {
+  if (-not (Get-Command psql -ErrorAction SilentlyContinue)) {
+    Write-Warn "psql not on PATH. It was installed via Chocolatey — restart your shell if needed."
+  }
+}
+
+# ─── STEP 5/14: ffmpeg for media transcoding ───────────────────────────────
+Write-Step "── STEP 5/14: ffmpeg ──"
+if (Get-Command ffmpeg -ErrorAction SilentlyContinue) {
+  Write-OK "ffmpeg already present: $(ffmpeg -version 2>$null | Select-Object -First 1)"
+} else {
+  Write-Warn "ffmpeg not detected — reinstall your shell or check PATH"
+}
+
+# ─── STEP 6/14: Clone or update repository ──────────────────────────────────
+Write-Step "── STEP 6/14: Clone or update repository ──"
 if (Test-Path "$INSTALL_DIR\.git") {
   Push-Location $INSTALL_DIR
   git fetch --all
@@ -64,22 +82,22 @@ if (Test-Path "$INSTALL_DIR\.git") {
 }
 Write-OK "Repository ready at $INSTALL_DIR"
 
-# ─── STEP 5/11: npm dependencies ─────────────────────────────────────────────
-Write-Step "── STEP 5/11: npm dependencies ──"
+# ─── STEP 7/14: npm dependencies ─────────────────────────────────────────────
+Write-Step "── STEP 7/14: npm dependencies ──"
 Push-Location $INSTALL_DIR
 npm ci --include=dev
 Write-OK "npm dependencies installed"
 
-# ─── STEP 6/11: Python venv + Playwright/Chromium ───────────────────────────
-Write-Step "── STEP 6/11: Python venv + Playwright/Chromium ──"
+# ─── STEP 8/14: Python venv + Playwright/Chromium ───────────────────────────
+Write-Step "── STEP 8/14: Python venv + Playwright/Chromium ──"
 if (-not (Test-Path ".venv")) { python -m venv .venv }
 & .\.venv\Scripts\python.exe -m pip install --upgrade pip
 & .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 & .\.venv\Scripts\python.exe -m playwright install chromium 2>$null
 Write-OK "Python dependencies installed"
 
-# ─── STEP 7/11: Ollama (Hermes 3 model) ──────────────────────────────────────
-Write-Step "── STEP 7/11: Ollama ──"
+# ─── STEP 9/14: Ollama (Hermes 3 model) ──────────────────────────────────────
+Write-Step "── STEP 9/14: Ollama ──"
 if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {
   Write-Step "Downloading Ollama for Windows"
   $ollamaUrl = "https://ollama.com/download/OllamaSetup.exe"
@@ -97,8 +115,8 @@ if (Get-Command ollama -ErrorAction SilentlyContinue) {
   try { ollama pull hermes3:latest } catch { Write-Warn "Failed to pull hermes3 — Beatrice will fall back to other agents" }
 }
 
-# ─── STEP 8/11: OpenCode CLI (terminal sub-agent) ───────────────────────────
-Write-Step "── STEP 8/11: OpenCode CLI ──"
+# ─── STEP 10/14: OpenCode CLI (terminal sub-agent) ───────────────────────────
+Write-Step "── STEP 10/14: OpenCode CLI ──"
 $opencodeBin = "$env:USERPROFILE\.opencode\bin\opencode.exe"
 if (-not (Test-Path $opencodeBin)) {
   Write-Step "Downloading OpenCode CLI"
@@ -108,8 +126,8 @@ if (-not (Test-Path $opencodeBin)) {
   Write-OK "OpenCode CLI already installed"
 }
 
-# ─── STEP 9/11: OpenCode skills from eburonhub-skills ───────────────────────
-Write-Step "── STEP 9/11: OpenCode skills from eburonhub-skills ──"
+# ─── STEP 11/14: OpenCode skills from eburonhub-skills ───────────────────────
+Write-Step "── STEP 11/14: OpenCode skills from eburonhub-skills ──"
 $skillsDir = "$INSTALL_DIR\.opencode\skills"
 if (-not (Test-Path $skillsDir)) { New-Item -ItemType Directory -Path $skillsDir -Force | Out-Null }
 $eburonhubSkills = "$skillsDir\eburonhub-skills"
@@ -128,8 +146,19 @@ if (Test-Path "$eburonhubSkills\skills") {
 }
 Write-OK "eburonhub-skills installed"
 
-# ─── STEP 10/11: PM2 + sandbox dirs + .env + build ──────────────────────────
-Write-Step "── STEP 10/11: PM2 process manager + sandbox dirs + .env + build ──"
+# ─── STEP 12/14: Supabase CLI (self-hosted Supabase) ────────────────────────
+Write-Step "── STEP 12/14: Supabase CLI ──"
+if (Get-Command supabase -ErrorAction SilentlyContinue) {
+  Write-OK "Supabase CLI already present"
+} else {
+  Write-Step "Installing Supabase CLI via npm"
+  npm install -g supabase 2>&1 | Out-Host
+  $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+  if (Get-Command supabase -ErrorAction SilentlyContinue) { Write-OK "Supabase CLI installed" } else { Write-Warn "Supabase CLI install reported warnings" }
+}
+
+# ─── STEP 13/14: PM2 + sandbox dirs + .env + WhatsApp Cloud + build ────────
+Write-Step "── STEP 13/14: PM2 + sandbox dirs + .env + WhatsApp Cloud + build ──"
 if (-not (Get-Command pm2 -ErrorAction SilentlyContinue)) {
   npm install -g pm2
   $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
@@ -157,6 +186,20 @@ if (-not (Test-Path ".env.local") -and (Test-Path ".env.local.example")) {
   Copy-Item .env.local.example .env.local
 }
 
+# Add WhatsApp Cloud API env placeholders if missing
+$waCloudMarker = "WHATSAPP_CLOUD_PHONE_NUMBER_ID"
+if (-not (Select-String -Path ".env" -Pattern $waCloudMarker -Quiet)) {
+  Add-Content -Path ".env" -Value @"
+
+# ── WhatsApp Cloud API (optional — alternative to Baileys) ──
+# WHATSAPP_CLOUD_PHONE_NUMBER_ID=
+# WHATSAPP_CLOUD_ACCESS_TOKEN=
+# WHATSAPP_CLOUD_BUSINESS_ACCOUNT_ID=
+# WHATSAPP_CLOUD_WEBHOOK_VERIFY_TOKEN=
+"@
+  Write-OK "Added WhatsApp Cloud API env placeholders to .env"
+}
+
 Write-Step "Building frontend (Vite production build)"
 npm run build
 Write-OK "Frontend built to dist/"
@@ -176,10 +219,10 @@ Write-OK "Created start.bat launcher"
 
 Pop-Location
 
-# ─── STEP 11/11: Verify installation ────────────────────────────────────────
-Write-Step "── STEP 11/11: Verify installation ──"
+# ─── STEP 14/14: Verify installation ────────────────────────────────────────
+Write-Step "── STEP 14/14: Verify installation ──"
 $failed = 0
-foreach ($cmd in @("node", "npm", "python", "git", "docker", "ollama", "pm2")) {
+foreach ($cmd in @("node", "npm", "python", "git", "docker", "psql", "ffmpeg", "ollama", "supabase", "pm2")) {
   if (Get-Command $cmd -ErrorAction SilentlyContinue) {
     Write-OK "$cmd: present"
   } else {
@@ -205,4 +248,6 @@ Write-Host "  • Restart after editing env:  cd $INSTALL_DIR && start.bat" -For
 Write-Host "  • Ollama models:             ollama list" -ForegroundColor White
 Write-Host "  • OpenCode skills:           $INSTALL_DIR\.opencode\skills\" -ForegroundColor White
 Write-Host "  • Docker:                    docker --version" -ForegroundColor White
+Write-Host "  • Supabase (self-hosted):    cd $INSTALL_DIR; supabase start" -ForegroundColor White
+Write-Host "  • ffmpeg:                    ffmpeg -version" -ForegroundColor White
 Write-Host ""

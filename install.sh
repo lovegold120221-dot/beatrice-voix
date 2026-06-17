@@ -57,7 +57,8 @@ install_deps_debian() {
     libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
     libgbm1 libpango-1.0-0 libcairo2 libasound2t64 \
     chromium chromium-driver fonts-liberation \
-    dumb-init unzip nginx ufw certbot python3-certbot-nginx
+    dumb-init unzip nginx ufw certbot python3-certbot-nginx \
+    ffmpeg postgresql-client redis-tools
   ok "System packages installed"
 }
 
@@ -70,8 +71,90 @@ install_deps_macos() {
     [ -f /usr/local/bin/brew ] && eval "$(/usr/local/bin/brew shellenv)"
   fi
   brew update
-  brew install git python@3.11 chromium nginx
+  brew install git python@3.11 chromium nginx postgresql@15 ffmpeg supabase/tap/supabase
   ok "System packages installed"
+}
+
+# ─── Install PostgreSQL client (psql) for Supabase migrations ───────────────
+install_postgres_client() {
+  if command -v psql >/dev/null 2>&1; then
+    ok "PostgreSQL client already installed: $(psql --version)"
+    return
+  fi
+  step "Installing PostgreSQL client (psql)"
+  if [ "$OS_FAMILY" = "debian" ]; then
+    if [ "$(id -u)" -ne 0 ]; then SUDO="sudo"; else SUDO=""; fi
+    $SUDO apt-get install -y --no-install-recommends postgresql-client
+  elif [ "$OS_FAMILY" = "macos" ]; then
+    brew install libpq
+    brew link --force libpq 2>/dev/null || true
+  fi
+  ok "PostgreSQL client installed"
+}
+
+# ─── Install Supabase CLI (for self-hosted Supabase via Docker) ──────────────
+install_supabase_cli() {
+  if command -v supabase >/dev/null 2>&1; then
+    ok "Supabase CLI already installed: $(supabase --version)"
+    return
+  fi
+  step "Installing Supabase CLI (for self-hosted Supabase + migrations)"
+  if [ "$OS_FAMILY" = "debian" ]; then
+    if [ "$(id -u)" -ne 0 ]; then SUDO="sudo"; else SUDO=""; fi
+    ARCH="$(uname -m)"
+    case "$ARCH" in
+      x86_64) SB_ARCH="amd64" ;;
+      aarch64|arm64) SB_ARCH="arm64" ;;
+      *) SB_ARCH="amd64" ;;
+    esac
+    curl -fsSL "https://github.com/supabase/cli/releases/latest/download/supabase_linux_${SB_ARCH}.tar.gz" -o /tmp/supabase.tar.gz
+    tar -xzf /tmp/supabase.tar.gz -C /tmp supabase
+    $SUDO mv /tmp/supabase /usr/local/bin/supabase
+    $SUDO chmod +x /usr/local/bin/supabase
+  elif [ "$OS_FAMILY" = "macos" ]; then
+    brew install supabase/tap/supabase
+  fi
+  command -v supabase >/dev/null 2>&1 || warn "Supabase CLI install reported non-zero"
+  ok "Supabase CLI ready"
+}
+
+# ─── Install ffmpeg (media transcoding for future media features) ───────────
+install_ffmpeg() {
+  if command -v ffmpeg >/dev/null 2>&1; then
+    ok "ffmpeg already installed: $(ffmpeg -version 2>/dev/null | head -1)"
+    return
+  fi
+  step "Installing ffmpeg (media transcoding)"
+  if [ "$OS_FAMILY" = "debian" ]; then
+    if [ "$(id -u)" -ne 0 ]; then SUDO="sudo"; else SUDO=""; fi
+    $SUDO apt-get install -y --no-install-recommends ffmpeg
+  elif [ "$OS_FAMILY" = "macos" ]; then
+    brew install ffmpeg
+  fi
+  ok "ffmpeg installed"
+}
+
+# ─── Install WhatsApp Cloud API optional config ─────────────────────────────
+install_whatsapp_cloud() {
+  step "Configuring WhatsApp Cloud API env variables (optional)"
+  cd "$INSTALL_DIR"
+  if [ ! -f .env ]; then
+    warn "Skipping — .env not yet created"
+    return
+  fi
+  if ! grep -q "^WHATSAPP_CLOUD_PHONE_NUMBER_ID" .env; then
+    cat >> .env <<'EOF'
+
+# ── WhatsApp Cloud API (optional — alternative to Baileys) ──
+# WHATSAPP_CLOUD_PHONE_NUMBER_ID=
+# WHATSAPP_CLOUD_ACCESS_TOKEN=
+# WHATSAPP_CLOUD_BUSINESS_ACCOUNT_ID=
+# WHATSAPP_CLOUD_WEBHOOK_VERIFY_TOKEN=
+EOF
+    ok "Added WhatsApp Cloud API env placeholder to .env"
+  else
+    ok "WhatsApp Cloud API env already present"
+  fi
 }
 
 # ─── Install Docker Engine + Compose (for containerized services) ────────────
@@ -314,8 +397,11 @@ verify_installation() {
   check_cmd python3 "Python 3"
   check_cmd git     "Git"
   check_cmd docker  "Docker"
+  check_cmd psql    "PostgreSQL client (psql)"
+  check_cmd ffmpeg  "ffmpeg"
   check_cmd ollama  "Ollama"
   check_cmd opencode "OpenCode CLI"
+  check_cmd supabase "Supabase CLI"
   check_cmd pm2     "PM2"
 
   if docker compose version >/dev/null 2>&1; then
@@ -455,41 +541,51 @@ main() {
   echo "╚════════════════════════════════════════════╝"
   echo -e "${NC}"
 
-  step "── STEP 1/11: System packages (apt/brew) ──"
+  step "── STEP 1/14: System packages (apt/brew) ──"
   if [ "$OS_FAMILY" = "debian" ]; then install_deps_debian; fi
   if [ "$OS_FAMILY" = "macos" ]; then install_deps_macos; fi
 
-  step "── STEP 2/11: Node.js ${NODE_VERSION} (apt/brew) ──"
+  step "── STEP 2/14: Node.js ${NODE_VERSION} (apt/brew) ──"
   install_node
 
-  step "── STEP 3/11: Docker Engine + Compose ──"
+  step "── STEP 3/14: Docker Engine + Compose ──"
   install_docker
 
-  step "── STEP 4/11: Clone or update repository ──"
+  step "── STEP 4/14: PostgreSQL client (psql) for Supabase migrations ──"
+  install_postgres_client
+
+  step "── STEP 5/14: ffmpeg (media transcoding) ──"
+  install_ffmpeg
+
+  step "── STEP 6/14: Clone or update repository ──"
   clone_repo
 
-  step "── STEP 5/11: npm dependencies ──"
+  step "── STEP 7/14: npm dependencies ──"
   install_npm_deps
 
-  step "── STEP 6/11: Python venv + Playwright/Chromium ──"
+  step "── STEP 8/14: Python venv + Playwright/Chromium ──"
   install_python_deps
 
-  step "── STEP 7/11: Ollama (Hermes 3 model) ──"
+  step "── STEP 9/14: Ollama (Hermes 3 model) ──"
   install_ollama
 
-  step "── STEP 8/11: OpenCode CLI binary ──"
+  step "── STEP 10/14: OpenCode CLI binary ──"
   install_opencode
 
-  step "── STEP 9/11: OpenCode skills from eburonhub-skills ──"
+  step "── STEP 11/14: OpenCode skills from eburonhub-skills ──"
   install_opencode_skills
 
-  step "── STEP 10/11: PM2 process manager + sandbox dirs + .env + build ──"
+  step "── STEP 12/14: Supabase CLI (for self-hosted Supabase) ──"
+  install_supabase_cli
+
+  step "── STEP 13/14: PM2 + sandbox dirs + .env + WhatsApp Cloud config + build ──"
   install_pm2
   setup_sandbox_dirs
   setup_env
+  install_whatsapp_cloud
   build_frontend
 
-  step "── STEP 11/11: Verify and start ──"
+  step "── STEP 14/14: Verify and start ──"
   verify_installation
   start_server
 
@@ -505,6 +601,8 @@ main() {
   echo "  • Ollama models:             ollama list"
   echo "  • OpenCode skills:           $INSTALL_DIR/.opencode/skills/"
   echo "  • Docker:                    docker compose version"
+  echo "  • Supabase (self-hosted):    cd $INSTALL_DIR && supabase start"
+  echo "  • ffmpeg:                    ffmpeg -version"
   echo ""
 }
 
