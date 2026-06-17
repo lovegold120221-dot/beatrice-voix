@@ -10,6 +10,8 @@ import {
   generateEburonWorker,
   generateEburonSandbox,
   generateEburonText,
+  generateEburonVision,
+  transcribeEburonAudio,
   createEburonClient,
   resolveEburonModelAlias,
 } from './eburon-provider';
@@ -148,6 +150,46 @@ app.get('/api/eburon/provider', async (_req, res) => {
   }
 });
 
+app.post('/api/eburon/analyze-image', async (req, res) => {
+  try {
+    const { imageUrl, imageData, prompt } = req.body;
+    if (!imageUrl && !imageData) { res.status(400).json({ error: 'imageUrl or imageData required' }); return; }
+    let imgData = imageData;
+    let mimeType = 'image/jpeg';
+    if (imageUrl) {
+      const response = await fetch(imageUrl, { signal: AbortSignal.timeout(15000) });
+      if (!response.ok) { res.status(502).json({ error: 'Failed to fetch image' }); return; }
+      const contentType = response.headers.get('content-type') || 'image/jpeg';
+      const buf = Buffer.from(await response.arrayBuffer());
+      imgData = buf.toString('base64');
+      mimeType = contentType;
+    }
+    const result = await generateEburonVision({
+      prompt: prompt || 'Describe this image in detail. What do you see? Include text, objects, people, colors, and any relevant details.',
+      imageData: imgData,
+      mimeType,
+    });
+    res.json({ ok: true, description: result.text });
+  } catch (err: any) {
+    res.status(500).json({ error: getMsg(err) });
+  }
+});
+
+app.post('/api/eburon/transcribe-audio', async (req, res) => {
+  try {
+    const { audioData, mimeType, prompt } = req.body;
+    if (!audioData) { res.status(400).json({ error: 'audioData (base64) required' }); return; }
+    const result = await transcribeEburonAudio({
+      audioData,
+      mimeType: mimeType || 'audio/ogg',
+      prompt: prompt || 'Transcribe the audio content exactly as spoken. Include speaker labels if distinguishable.',
+    });
+    res.json({ ok: true, transcript: result.text });
+  } catch (err: any) {
+    res.status(500).json({ error: getMsg(err) });
+  }
+});
+
 app.post('/api/web/glance', async (req, res) => {
   try {
     const query = typeof req.body?.query === 'string' ? req.body.query.trim() : '';
@@ -210,6 +252,38 @@ app.post('/api/web/glance', async (req, res) => {
   } catch (err: any) {
     console.error('Web glance error:', err);
     res.status(500).json({ error: err.message || 'Web glance failed' });
+  }
+});
+
+app.post('/api/web/read-page', async (req, res) => {
+  try {
+    const { url, maxLength } = req.body;
+    if (!url) { res.status(400).json({ error: 'url required' }); return; }
+    const response = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; BeatriceBot/1.0)' },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!response.ok) { res.status(502).json({ error: `Page fetch failed with status ${response.status}` }); return; }
+    const html = await response.text();
+    const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i);
+    const title = titleMatch ? titleMatch[1].trim() : '';
+    const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+    const bodyText = bodyMatch ? bodyMatch[1] : html;
+    const cleaned = bodyText
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
+      .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '')
+      .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&[^;]+;/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const max = Math.min(Math.max(Number(maxLength) || 10000, 1000), 50000);
+    const content = cleaned.substring(0, max);
+    res.json({ ok: true, url, title, content, contentLength: content.length });
+  } catch (err: any) {
+    res.status(502).json({ error: `Failed to read page: ${getMsg(err)}` });
   }
 });
 
@@ -539,6 +613,34 @@ const getMsg = (e: any) => e?.message || String(e);
           res.status(502).json({ error: `Download failed: ${getMsg(dlErr)}` });
         }
       }
+    } catch (err: any) {
+      res.status(500).json({ error: getMsg(err) });
+    }
+  });
+
+  app.post('/api/whatsapp/read-attachment/:userId/:chatId/:messageId', async (req, res) => {
+    try {
+      const { userId, chatId, messageId } = req.params;
+      if (!waManager) { res.status(503).json({ error: 'WhatsApp not available' }); return; }
+      const result = await waManager.downloadAttachmentContent(userId, chatId, messageId);
+      if (!result) { res.status(404).json({ error: 'Attachment not found or expired' }); return; }
+      const { extractFileContent } = await import('./file-extractor');
+      const extracted = extractFileContent(result.buffer, result.mimeType, result.fileName);
+      res.json(extracted);
+    } catch (err: any) {
+      res.status(500).json({ error: getMsg(err) });
+    }
+  });
+
+  app.post('/api/whatsapp/send-document', async (req, res) => {
+    try {
+      const { userId, to, content, fileName, caption } = req.body;
+      if (!userId || !to || !content || !fileName) { res.status(400).json({ error: 'userId, to, content, and fileName required' }); return; }
+      if (!waManager) { res.status(503).json({ error: 'WhatsApp not available' }); return; }
+      const buffer = Buffer.from(content, 'utf-8');
+      const sent = await waManager.sendDocumentBuffer(userId, to, buffer, fileName, caption);
+      if (!sent) { res.status(502).json({ error: 'Failed to send document' }); return; }
+      res.json({ ok: true, chatId: sent.chatId, messageId: sent.messageId });
     } catch (err: any) {
       res.status(500).json({ error: getMsg(err) });
     }

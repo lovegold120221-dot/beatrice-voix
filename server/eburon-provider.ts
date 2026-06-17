@@ -172,6 +172,41 @@ export async function generateEburonVision(params: {
   }
 }
 
+export async function transcribeEburonAudio(params: {
+  model?: string;
+  audioData: string; // base64
+  mimeType?: string;
+  prompt?: string;
+}): Promise<{ text: string }> {
+  const modelAlias = params.model || 'eburon_text';
+  if (!validateEburonModel(modelAlias)) {
+    throw new Error(`[Eburon] Model alias not in whitelist: ${modelAlias}`);
+  }
+
+  const modelId = resolveEburonModelAlias(modelAlias);
+  const client = getEburonClient();
+
+  try {
+    const response = await client.models.generateContent({
+      model: modelId,
+      contents: [
+        { text: params.prompt || 'Transcribe the audio content exactly as spoken. Include speaker labels if distinguishable.' },
+        {
+          inlineData: {
+            mimeType: params.mimeType || 'audio/ogg',
+            data: params.audioData,
+          },
+        },
+      ],
+    });
+
+    return { text: response.text || '' };
+  } catch (err: any) {
+    console.error('[Eburon] Audio transcription failed:', err.message || err);
+    throw new Error('[Eburon] Audio transcription failed');
+  }
+}
+
 export async function generateEburonWorker(params: {
   model?: string;
   prompt: string;

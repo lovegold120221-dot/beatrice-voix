@@ -1,6 +1,7 @@
 import { Boom } from '@hapi/boom';
 import makeWASocket, {
   DisconnectReason,
+  downloadContentFromMessage,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
@@ -850,6 +851,40 @@ export class WhatsAppManager extends EventEmitter {
     const body = mediaType === 'sticker' ? '[sticker]' : (caption || `[${mediaType}]`);
     const msgId = sent?.key?.id;
     this.trackSentMessage(userId, chatId, body, chatId.endsWith('@g.us'), msgId);
+    return { chatId, messageId: msgId };
+  }
+
+  async downloadAttachmentContent(userId: string, chatId: string, messageId: string): Promise<{ buffer: Buffer; mimeType: string; fileName?: string } | null> {
+    const msg = this.getMessageById(userId, chatId, messageId);
+    if (!msg) return null;
+    const mediaMsg = msg.message?.imageMessage || msg.message?.videoMessage || msg.message?.audioMessage || msg.message?.documentMessage || msg.message?.stickerMessage;
+    if (!mediaMsg) return null;
+    const mediaType = msg.message?.imageMessage ? 'image' : msg.message?.videoMessage ? 'video' : msg.message?.audioMessage ? 'audio' : msg.message?.documentMessage ? 'document' : 'sticker';
+    const mimeType = mediaMsg.mimetype || 'application/octet-stream';
+    const fileName = mediaMsg.fileName || (mediaType === 'image' ? 'image' : mediaType === 'video' ? 'video' : mediaType === 'audio' ? 'audio' : 'file');
+    try {
+      const stream = await downloadContentFromMessage(mediaMsg, mediaType as any);
+      if (!stream) return null;
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+      return { buffer: Buffer.concat(chunks), mimeType, fileName };
+    } catch {
+      return null;
+    }
+  }
+
+  async sendDocumentBuffer(userId: string, to: string, buffer: Buffer, fileName: string, caption?: string): Promise<{ chatId: string; messageId?: string } | null> {
+    const sock = this.getClient(userId);
+    if (!sock) return null;
+    const chatId = this.resolveContactJid(userId, to);
+    const sent = await sock.sendMessage(chatId, {
+      document: buffer,
+      fileName,
+      mimetype: 'application/octet-stream',
+      caption,
+    });
+    const msgId = sent?.key?.id;
+    this.trackSentMessage(userId, chatId, caption || `[document: ${fileName}]`, chatId.endsWith('@g.us'), msgId);
     return { chatId, messageId: msgId };
   }
 

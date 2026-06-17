@@ -401,6 +401,13 @@ export async function handleWhatsAppAction(
       case 'resync':
         return { ok: true, result: await wa.forceResync(userId) };
 
+      // ─── FILE / ATTACHMENT OPERATIONS ────────────────────────────────
+      case 'readAttachment':
+        return handleReadAttachment(wa, userId, effectivePermissions, pickWhatsAppRecipient(params), params.messageId);
+
+      case 'sendDocument':
+        return handleSendDocument(wa, userId, effectivePermissions, pickWhatsAppRecipient(params), params.content, params.fileName, params.caption);
+
       default:
         return { ok: false, error: `Unknown WhatsApp tool: ${tool}` };
     }
@@ -580,4 +587,41 @@ export async function handleSendButtons(
     .join('\n');
   const body = [text, renderedButtons, footer].filter(Boolean).join('\n\n');
   return handleSendMessage(wa, userId, permissions, to, body);
+}
+
+export async function handleReadAttachment(
+  wa: WhatsAppManager,
+  userId: string,
+  permissions: Record<string, any> | undefined,
+  chatId: string,
+  messageId: string,
+): Promise<any> {
+  const denied = requirePerm(permissions, 'access_documents');
+  if (denied) return { ok: false, error: denied };
+  if (!wa.isPaired(userId)) return { ok: false, error: 'WhatsApp not paired' };
+  const result = await wa.downloadAttachmentContent(userId, chatId, messageId);
+  if (!result) return { ok: false, error: 'Attachment not found or expired' };
+  const { extractFileContent } = await import('./file-extractor');
+  const extracted = extractFileContent(result.buffer, result.mimeType, result.fileName);
+  return { ok: true, ...extracted };
+}
+
+export async function handleSendDocument(
+  wa: WhatsAppManager,
+  userId: string,
+  permissions: Record<string, any> | undefined,
+  to: string,
+  content: string,
+  fileName: string,
+  caption?: string,
+): Promise<any> {
+  const denied = requirePerm(permissions, 'send_messages');
+  if (denied) return { ok: false, error: denied };
+  const approvalDenied = requireDelegatedSendApproval(permissions);
+  if (approvalDenied) return { ok: false, error: approvalDenied };
+  if (!wa.isPaired(userId)) return { ok: false, error: 'WhatsApp not paired' };
+  const buffer = Buffer.from(content, 'utf-8');
+  const sent = await wa.sendDocumentBuffer(userId, to, buffer, fileName, caption);
+  if (!sent) return { ok: false, error: 'Failed to send document' };
+  return { ok: true, sent: true, chatId: sent.chatId, messageId: sent.messageId };
 }

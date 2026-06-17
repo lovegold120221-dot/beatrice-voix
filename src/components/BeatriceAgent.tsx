@@ -1916,7 +1916,7 @@ export function BeatriceAgent({
         return `<div class="wa-item"><div class="wa-avatar">${name[0].toUpperCase()}</div><div class="wa-info"><div class="wa-name">${name}</div><div class="wa-meta">${phone}${email ? ` • ${email}` : ''}</div></div></div>`;
       }).join('');
       finalHtml = `<h1>👤 Google Contacts</h1><p style="font-size:12px; color:#64748b; margin-bottom:20px;">Total sync: ${list.length} records.</p>${rows || '<p style="text-align:center; padding:40px; color:#64748b;">No contacts found in your Google account.</p>'}`;
-    } else if (toolName === 'whatsapp_action' || toolName === 'resolve_contact' || toolName === 'read_whatsapp_chats' || toolName === 'send_whatsapp_message' || toolName === 'send_whatsapp_group_message' || toolName === 'get_whatsapp_contacts' || toolName === 'get_whatsapp_groups' || toolName === 'get_whatsapp_message_history' || toolName === 'get_whatsapp_calls') {
+    } else if (toolName === 'whatsapp_action' || toolName === 'resolve_contact' || toolName === 'read_whatsapp_chats' || toolName === 'send_whatsapp_message' || toolName === 'send_whatsapp_group_message' || toolName === 'get_whatsapp_contacts' || toolName === 'get_whatsapp_groups' || toolName === 'get_whatsapp_message_history' || toolName === 'get_whatsapp_calls' || toolName === 'read_whatsapp_attachment' || toolName === 'send_whatsapp_document') {
       const data = result.result || result;
       if (data.chats) {
         const rows = data.chats.map((c: any) => {
@@ -1967,6 +1967,11 @@ export function BeatriceAgent({
         const resolvedData = data.contact ? data : result.result;
         const c = resolvedData.contact;
         finalHtml = `<h1 style="color:#10b981;">✅ Recipient Verified</h1><div style="background:rgba(16,185,129,0.05); border:1px solid #10b981; padding:20px; border-radius:18px; margin-top:20px; display:flex; align-items:center; gap:16px;"><div style="width:50px; height:50px; border-radius:50%; background:#10b981; color:#000; display:flex; align-items:center; justify-content:center; font-weight:bold; font-size:20px;">${(c.display_name && isNaN(parseInt(c.display_name[0]))) ? c.display_name[0].toUpperCase() : '👤'}</div><div><div style="font-size:18px; font-weight:bold; color:#fff;">${c.display_name}</div><div style="font-size:14px; color:#10b981; margin-top:2px;">${c.phone_e164}</div><div style="font-size:10px; color:#64748b; text-transform:uppercase; margin-top:6px; letter-spacing:1px;">${c.source} Identity Linked</div></div></div>`;
+      } else if (toolName === 'read_whatsapp_attachment' && result?.content) {
+        const escapedContent = result.content.replace(/[&<>"']/g, (c: string) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c] || c));
+        const fileInfo = `${result.fileName || 'unnamed'} (${((result.fileSize || 0) / 1024).toFixed(1)} KB)`;
+        const imageTag = result.base64Content ? `<div style="margin:16px 0; text-align:center;"><img src="${result.base64Content}" style="max-width:100%; max-height:400px; border-radius:12px; border:1px solid #1f2025;" /></div>` : '';
+        finalHtml = `<h1>📎 Attachment Content</h1><p style="font-size:11px; color:#64748b; margin-bottom:16px; text-transform:uppercase; letter-spacing:1px;">${fileInfo} • ${result.mimeType || 'unknown'}</p>${imageTag}<div style="background:#1a1b1f; border:1px solid #1f2025; padding:20px; border-radius:18px; font-family:monospace; font-size:12px; color:#d0a78b; white-space:pre-wrap; overflow-x:auto; max-height:500px; overflow-y:auto;"><pre style="margin:0; font-family:inherit; white-space:pre-wrap; word-break:break-word;">${escapedContent}</pre></div>`;
       } else {
         finalHtml = `<h1>🛠️ Tool Output</h1><div style="background:#1a1b1f; border:1px solid #1f2025; padding:20px; border-radius:18px; font-family:monospace; font-size:12px; color:#d0a78b; white-space:pre-wrap; overflow-x:auto;">${JSON.stringify(result, null, 2)}</div>`;
       }
@@ -1998,6 +2003,16 @@ export function BeatriceAgent({
       } else {
         finalHtml = `<h1>🇧🇪 Belgian Tool Result</h1><div style="background:#1a1b1f; border:1px solid #1f2025; padding:20px; border-radius:18px; font-family:monospace; font-size:12px; color:#d0a78b; white-space:pre-wrap; overflow-x:auto;">${JSON.stringify(result, null, 2)}</div>`;
       }
+    } else if (toolName === 'analyze_image' && result?.description) {
+      const escapedDesc = result.description.replace(/[&<>"']/g, (c: string) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c] || c));
+      finalHtml = `<h1>🖼️ Image Analysis</h1><div style="background:#1a1b1f; border:1px solid #1f2025; padding:20px; border-radius:18px; font-family:monospace; font-size:13px; color:#f0e6df; white-space:pre-wrap; overflow-x:auto; max-height:500px; overflow-y:auto; line-height:1.6;"><pre style="margin:0; font-family:inherit; white-space:pre-wrap; word-break:break-word;">${escapedDesc}</pre></div>`;
+    } else if (toolName === 'read_web_page' && result?.content) {
+      const escapedContent = result.content.replace(/[&<>"']/g, (c: string) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c] || c));
+      const pageTitle = result.title ? `<p style="font-size:12px; color:#94a3b8; margin-bottom:16px;">${result.title}</p>` : '';
+      finalHtml = `<h1>📄 Web Page Content</h1>${pageTitle}<p style="font-size:11px; color:#64748b; margin-bottom:16px;">Source: ${result.url || 'unknown'} (${result.contentLength || 0} chars)</p><div style="background:#1a1b1f; border:1px solid #1f2025; padding:20px; border-radius:18px; font-family:monospace; font-size:12px; color:#d0a78b; white-space:pre-wrap; overflow-x:auto; max-height:500px; overflow-y:auto;"><pre style="margin:0; font-family:inherit; white-space:pre-wrap; word-break:break-word;">${escapedContent}</pre></div>`;
+    } else if (toolName === 'transcribe_audio' && result?.transcript) {
+      const escapedTranscript = result.transcript.replace(/[&<>"']/g, (c: string) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c] || c));
+      finalHtml = `<h1>🎤 Audio Transcription</h1><div style="background:#1a1b1f; border:1px solid #1f2025; padding:20px; border-radius:18px; font-family:monospace; font-size:13px; color:#f0e6df; white-space:pre-wrap; overflow-x:auto; max-height:500px; overflow-y:auto; line-height:1.8;"><pre style="margin:0; font-family:inherit; white-space:pre-wrap; word-break:break-word;">${escapedTranscript}</pre></div>`;
     } else {
       finalHtml = `<h1>🛠️ System Result</h1><div style="background:#1a1b1f; border:1px solid #1f2025; padding:20px; border-radius:18px; font-family:monospace; font-size:12px; color:#d0a78b; white-space:pre-wrap; overflow-x:auto;">${JSON.stringify(result, null, 2)}</div>`;
     }
@@ -2884,6 +2899,13 @@ You have access to cerebras_browser_task for web browsing, data extraction, form
 - Use cerebras_browser_task for anything that involves navigating a specific URL, clicking, scrolling, filling forms, or extracting structured data from a live website. For quick factual lookups, the built-in search handles it automatically.
 - After the browser task completes, present the result naturally: "I looked that up and found..." Never mention the underlying technology.
 
+MEDIA UNDERSTANDING TOOLS:
+You have three tools for understanding different types of content:
+- **analyze_image**: Use when someone sends you an image, photo, screenshot, or picture. Provide the image URL or base64 data and I'll describe what's in it including any visible text, objects, people, and colors.
+- **read_web_page**: Use to fetch and read the full text content of any web page (articles, docs, blogs). Provide the URL and I'll return the page title and readable content stripped of navigation and ads.
+- **transcribe_audio**: Use when someone sends you a voice message, audio recording, or any audio file. Provide the audio as base64 data and I'll transcribe the speech to text.
+- WhatsApp attachments (documents, images, audio) can already be downloaded and read with read_whatsapp_attachment.
+
 MEMORY SYSTEM GUIDANCE:
 You have two memory tools: add_to_memory and search_memory.
 - Call **add_to_memory** when the user says "remember this", "save this", "keep this in mind", or shares personal information, preferences, or facts they want you to recall later. Save it naturally — if they tell you their dog's name, their birthday, a project deadline, or a favorite restaurant, ask "should I remember that?" and if yes, call add_to_memory.
@@ -3541,6 +3563,69 @@ ${historyContext}
                       contact: { type: Type.STRING, description: "Contact name, JID, or phone number to unblock." }
                     },
                     required: ["contact"]
+                  }
+                },
+                {
+                  name: "read_whatsapp_attachment",
+                  description: "Download and read the content of a file or image attached to a WhatsApp message. Use this when someone sends you a document, PDF, image, or any file in a chat and you need to know what's inside. Returns the extracted text content or a base64 image representation.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      chatId: { type: Type.STRING, description: "The chat JID or contact name/phone number where the attachment was sent." },
+                      messageId: { type: Type.STRING, description: "The message ID of the attachment to read." }
+                    },
+                    required: ["chatId", "messageId"]
+                  }
+                },
+                {
+                  name: "send_whatsapp_document",
+                  description: "Generate and send a document or file via WhatsApp. Use this to send reports, invoices, notes, code files, or any text-based document as a WhatsApp attachment. The document will appear as a downloadable file in the chat.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      to: { type: Type.STRING, description: "Recipient name, JID, or phone number to send the document to." },
+                      fileName: { type: Type.STRING, description: "The filename including extension (e.g. 'report.pdf', 'notes.txt', 'data.csv')." },
+                      content: { type: Type.STRING, description: "The full text content of the document to send." },
+                      caption: { type: Type.STRING, description: "Optional caption or description to accompany the document." }
+                    },
+                    required: ["to", "fileName", "content"]
+                  }
+                },
+                {
+                  name: "analyze_image",
+                  description: "Analyze an image using AI vision. Use this when someone sends you an image, photo, screenshot, or picture and you need to describe, understand, or extract information from it. Provide either an image URL or image data. Returns a detailed description of what's in the image including text, objects, people, and colors.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      imageUrl: { type: Type.STRING, description: "URL of the image to analyze. Provide this OR imageData." },
+                      imageData: { type: Type.STRING, description: "Base64-encoded image data (data URI format). Provide this OR imageUrl." },
+                      prompt: { type: Type.STRING, description: "Optional specific question about the image. Default: 'Describe this image in detail.'" }
+                    }
+                  }
+                },
+                {
+                  name: "read_web_page",
+                  description: "Fetch and read the content of a web page. Use this when you need to read an article, documentation, blog post, or any web page to extract its readable text content. Returns the page title and main text content stripped of navigation, ads, and styling.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      url: { type: Type.STRING, description: "The full URL of the web page to read (e.g. 'https://example.com/page')." },
+                      maxLength: { type: Type.NUMBER, description: "Maximum characters to return (1000-50000, default 10000)." }
+                    },
+                    required: ["url"]
+                  }
+                },
+                {
+                  name: "transcribe_audio",
+                  description: "Transcribe audio content using AI speech-to-text. Use this when someone sends you a voice message, audio recording, or any audio file and you need to convert the speech to text. Provide the audio as base64-encoded data.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      audioData: { type: Type.STRING, description: "Base64-encoded audio data to transcribe." },
+                      mimeType: { type: Type.STRING, description: "Audio MIME type (e.g. 'audio/ogg', 'audio/mp3', 'audio/wav', 'audio/mp4'). Default: 'audio/ogg'." },
+                      prompt: { type: Type.STRING, description: "Optional context or instructions for transcription." }
+                    },
+                    required: ["audioData"]
                   }
                 },
                 {
@@ -4276,6 +4361,87 @@ ${historyContext}
                         });
                       } catch (e: any) {
                         result = { ok: false, error: e.message || 'Sync failed' };
+                      }
+                    } else if (callName === 'read_whatsapp_attachment') {
+                      const args = call.args as any;
+                      try {
+                        const resp = await fetch(`/api/whatsapp/read-attachment/${encodeURIComponent(user.uid)}/${encodeURIComponent(args.chatId)}/${encodeURIComponent(args.messageId)}`, { method: 'POST' });
+                        const data = await resp.json();
+                        if (!resp.ok) throw new Error(data.error || 'Failed to read attachment');
+                        result = { ok: true, content: data.textContent, base64Content: data.base64Content, fileName: data.fileName, mimeType: data.mimeType, fileSize: data.fileSize };
+                      } catch (e: any) {
+                        result = { ok: false, error: e.message || 'Failed to read attachment' };
+                      }
+                    } else if (callName === 'send_whatsapp_document') {
+                      const args = call.args as any;
+                      try {
+                        const { callWhatsAppTool } = await import('../lib/whatsappClient');
+                        result = await callWhatsAppTool(user.uid, 'sendDocument', {
+                          to: args.to,
+                          content: args.content,
+                          fileName: args.fileName,
+                          caption: args.caption || ''
+                        }, {
+                          send_messages: true,
+                          requireUserApproval: true,
+                          approvedByUser: true,
+                          mode: 'delegated_send',
+                        });
+                      } catch (e: any) {
+                        result = { ok: false, error: e.message || 'Failed to send document' };
+                      }
+                    } else if (callName === 'analyze_image') {
+                      const args = call.args as any;
+                      try {
+                        const resp = await fetch('/api/eburon/analyze-image', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            imageUrl: args.imageUrl || '',
+                            imageData: args.imageData || '',
+                            prompt: args.prompt || 'Describe this image in detail. What do you see? Include text, objects, people, colors, and any relevant details.',
+                          }),
+                        });
+                        const data = await resp.json();
+                        if (!resp.ok) throw new Error(data.error || 'Image analysis failed');
+                        result = { ok: true, description: data.description };
+                      } catch (e: any) {
+                        result = { ok: false, error: e.message || 'Image analysis failed' };
+                      }
+                    } else if (callName === 'read_web_page') {
+                      const args = call.args as any;
+                      try {
+                        const resp = await fetch('/api/web/read-page', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            url: args.url,
+                            maxLength: args.maxLength || 10000,
+                          }),
+                        });
+                        const data = await resp.json();
+                        if (!resp.ok) throw new Error(data.error || 'Failed to read page');
+                        result = { ok: true, title: data.title, content: data.content, url: data.url, contentLength: data.contentLength };
+                      } catch (e: any) {
+                        result = { ok: false, error: e.message || 'Failed to read web page' };
+                      }
+                    } else if (callName === 'transcribe_audio') {
+                      const args = call.args as any;
+                      try {
+                        const resp = await fetch('/api/eburon/transcribe-audio', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            audioData: args.audioData,
+                            mimeType: args.mimeType || 'audio/ogg',
+                            prompt: args.prompt || 'Transcribe the audio content exactly as spoken. Include speaker labels if distinguishable.',
+                          }),
+                        });
+                        const data = await resp.json();
+                        if (!resp.ok) throw new Error(data.error || 'Transcription failed');
+                        result = { ok: true, transcript: data.transcript };
+                      } catch (e: any) {
+                        result = { ok: false, error: e.message || 'Audio transcription failed' };
                       }
                     } else if (callName === 'run_sandbox_task') {
                       const args = call.args as any;
