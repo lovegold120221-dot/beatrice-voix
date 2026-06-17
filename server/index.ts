@@ -840,10 +840,66 @@ app.get('/site-build/:userId/:timestamp', async (req, res) => {
 // Runs complex tasks via OpenCode CLI or direct Eburon Worker call
 // Returns only a summary to keep the main agent's context clean
 
-import { execSync } from 'child_process';
+import { execSync, spawn } from 'child_process';
 import crypto from 'crypto';
 
 const OPENCODE_PATH = process.env.OPENCODE_PATH || '/root/.opencode/bin/opencode';
+const OPENCODE_MODEL = process.env.OPENCODE_MODEL || 'opencode/deepseek-v4-flash-free';
+const OPEN_TERMINAL_FALLBACK_MODEL = process.env.OPEN_TERMINAL_FALLBACK_MODEL || 'media-pipe/eburon-sandbox-worker:latest';
+const OPEN_TERMINAL_WORKDIR = path.resolve(process.env.OPEN_TERMINAL_WORKDIR || path.join(__dirname, '..'));
+const OPEN_TERMINAL_MAX_OUTPUT = 24_000;
+
+const BEATRICE_WORKSPACE_DIR = process.env.BEATRICE_WORKSPACE_DIR || '/data/beatrice-workspace';
+const BEATRICE_PUBLIC_URL = process.env.BEATRICE_PUBLIC_URL || 'https://whatsapp.eburon.ai';
+
+function ensureBeatricedDir(dir: string): void {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+}
+
+function sanitizePathSegment(segment: string): string {
+  return segment.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80) || 'unnamed';
+}
+
+function buildAppUrl(userId: string, appName: string): string {
+  const safeUser = sanitizePathSegment(userId);
+  const safeApp = sanitizePathSegment(appName);
+  return `${BEATRICE_PUBLIC_URL}/beatrice-workspace/${safeUser}/${safeApp}/`;
+}
+
+function buildWorkspacePath(userId: string, appName: string): string {
+  const safeUser = sanitizePathSegment(userId);
+  const safeApp = sanitizePathSegment(appName);
+  return path.join(BEATRICE_WORKSPACE_DIR, safeUser, safeApp);
+}
+
+let openTerminalQueue: Promise<void> = Promise.resolve();
+
+// ── Beatrice Workspace: serve AI-generated apps ──
+ensureBeatricedDir(BEATRICE_WORKSPACE_DIR);
+app.use('/beatrice-workspace', express.static(BEATRICE_WORKSPACE_DIR, {
+  extensions: ['html'],
+  index: 'index.html',
+}));
+
+type OpenTerminalResult = {
+  ok: boolean;
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  timedOut: boolean;
+  truncated: boolean;
+  command: string;
+  cwd: string;
+  model: string;
+  provider: 'opencode' | 'ollama';
+  fallback?: boolean;
+  primaryModel?: string;
+  error?: string;
+  appUrl?: string;
+  appWorkspace?: string;
+};
 
 // In-memory task progress store for SSE streaming
 const taskProgress = new Map<string, { status: string; agent?: string; message?: string; done?: boolean }>();
@@ -857,6 +913,232 @@ function setTaskProgress(taskId: string, status: string, opts?: { agent?: string
   if (opts?.message) entry.message = opts.message;
   taskProgress.set(taskId, entry);
 }
+
+function clampTerminalTimeout(timeout: unknown): number {
+  return Math.min(Math.max(Number(timeout) || 60, 10), 300);
+}
+
+function buildOpenTerminalPrompt(params: {
+  task: string;
+  skill?: string;
+  appName?: string;
+  workspacePath?: string;
+  appUrl?: string;
+}): string {
+  const safeTask = String(params.task || '').trim().slice(0, 12_000);
+  const safeSkill = String(params.skill || '').trim().slice(0, 80);
+
+  let context = '';
+  if (params.workspacePath && params.appName) {
+    context = [
+      `APP WORKSPACE CONTEXT:`,
+      `- You are generating the app "${params.appName}".`,
+      `- Save ALL output files to: ${params.workspacePath}/`,
+      `- After generation, the app will be served live at: ${params.appUrl}`,
+      `- Create a complete standalone app with index.html as the entry point.`,
+      `- Use only client-side technologies (HTML, CSS, JS). No server or build tools.`,
+      `- All assets (CSS, JS, images) must be inline or use absolute CDN URLs.`,
+      `- Create the directory and write files using terminal commands like mkdir -p, cat with heredoc, or tee.`,
+      `- Example: mkdir -p ${params.workspacePath} && cat > ${params.workspacePath}/index.html << 'APPEOF' ... APPEOF`,
+      ``,
+    ].join('\n');
+  }
+
+  let promptStr = context ? `${context}\nTASK:\n${safeTask}` : safeTask;
+  if (safeSkill) promptStr = `Use the ${safeSkill} skill if it is available, then complete this task:\n\n${promptStr}`;
+  return promptStr;
+}
+
+async function runOpenCodeTerminalTask(params: {
+  task: string;
+  skill?: string;
+  timeout: number;
+  appName?: string;
+  workspacePath?: string;
+  appUrl?: string;
+}): Promise<OpenTerminalResult> {
+  const prompt = buildOpenTerminalPrompt(params);
+  if (!prompt) throw new Error('task is required');
+  if (!fs.existsSync(OPENCODE_PATH)) throw new Error(`OpenCode CLI not found at ${OPENCODE_PATH}`);
+  if (!fs.existsSync(OPEN_TERMINAL_WORKDIR)) throw new Error(`Open terminal workdir not found: ${OPEN_TERMINAL_WORKDIR}`);
+
+  const args = ['run', '--model', OPENCODE_MODEL, '--dir', OPEN_TERMINAL_WORKDIR, '--dangerously-skip-permissions', prompt];
+  const child = spawn(OPENCODE_PATH, args, {
+    cwd: OPEN_TERMINAL_WORKDIR,
+    env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+    shell: false,
+  });
+
+  let stdout = '';
+  let stderr = '';
+  let truncated = false;
+
+  const append = (target: 'stdout' | 'stderr', chunk: Buffer) => {
+    const next = chunk.toString('utf8');
+    const combined = target === 'stdout' ? stdout + next : stderr + next;
+    if (combined.length > OPEN_TERMINAL_MAX_OUTPUT) truncated = true;
+    const clipped = combined.slice(0, OPEN_TERMINAL_MAX_OUTPUT);
+    if (target === 'stdout') stdout = clipped;
+    else stderr = clipped;
+  };
+
+  child.stdout.on('data', chunk => append('stdout', chunk));
+  child.stderr.on('data', chunk => append('stderr', chunk));
+
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    child.kill('SIGTERM');
+    setTimeout(() => {
+      if (!child.killed) child.kill('SIGKILL');
+    }, 2000).unref();
+  }, params.timeout * 1000);
+
+  return await new Promise((resolve, reject) => {
+    child.on('error', reject);
+    child.on('close', exitCode => {
+      clearTimeout(timer);
+      resolve({
+        ok: exitCode === 0 && !timedOut,
+        stdout,
+        stderr,
+        exitCode,
+        timedOut,
+        truncated,
+        command: 'opencode run',
+        cwd: OPEN_TERMINAL_WORKDIR,
+        model: OPENCODE_MODEL,
+        provider: 'opencode',
+        error: exitCode === 0 && !timedOut ? undefined : (stderr || stdout || 'OpenCode CLI execution failed').slice(0, 500),
+      });
+    });
+  });
+}
+
+async function runOpenTerminalOllamaFallback(params: {
+  task: string;
+  skill?: string;
+  timeout: number;
+  appName?: string;
+  workspacePath?: string;
+  appUrl?: string;
+}, primary: OpenTerminalResult): Promise<OpenTerminalResult> {
+  const prompt = buildOpenTerminalPrompt(params);
+  const systemPrompt = [
+    'You are Eburon Sandbox, the local fallback agent for Beatrice open-terminal skills.',
+    'Complete the requested repository or terminal-oriented task as well as possible from the prompt context.',
+    'Be concise, direct, and return only useful final output. If command execution would be required but is unavailable in fallback mode, say so briefly and provide the best next step.',
+  ].join('\n');
+
+  try {
+    const fallback = await callOllama(
+      OPEN_TERMINAL_FALLBACK_MODEL,
+      systemPrompt,
+      prompt,
+      Math.min(params.timeout, 180),
+      1024,
+      false,
+    );
+    const content = fallback.content.trim();
+    if (!content) throw new Error('Local Eburon sandbox returned an empty response');
+
+    return {
+      ok: true,
+      stdout: `${content}\n`,
+      stderr: [
+        `[OpenCode primary failed; used local Ollama fallback ${OPEN_TERMINAL_FALLBACK_MODEL}.]`,
+        primary.stderr || primary.error || '',
+      ].filter(Boolean).join('\n').slice(0, OPEN_TERMINAL_MAX_OUTPUT),
+      exitCode: null,
+      timedOut: false,
+      truncated: false,
+      command: 'ollama /api/chat',
+      cwd: OPEN_TERMINAL_WORKDIR,
+      model: fallback.model,
+      provider: 'ollama',
+      fallback: true,
+      primaryModel: primary.model,
+    };
+  } catch (err: any) {
+    return {
+      ...primary,
+      error: `OpenCode primary failed and local Ollama fallback failed: ${err.message || String(err)}`,
+    };
+  }
+}
+
+async function runOpenTerminalWithFallback(params: {
+  task: string;
+  skill?: string;
+  timeout: number;
+  appName?: string;
+  workspacePath?: string;
+  appUrl?: string;
+}): Promise<OpenTerminalResult> {
+  const primary = await runOpenCodeTerminalTask(params);
+  if (primary.ok) return primary;
+  return runOpenTerminalOllamaFallback(params, primary);
+}
+
+async function enqueueOpenCodeTerminalTask(params: {
+  task: string;
+  skill?: string;
+  timeout: number;
+  appName?: string;
+  workspacePath?: string;
+  appUrl?: string;
+}) {
+  const run = openTerminalQueue.then(
+    () => runOpenTerminalWithFallback(params),
+    () => runOpenTerminalWithFallback(params),
+  );
+  openTerminalQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+app.post('/api/terminal/open-skills', async (req, res) => {
+  try {
+    const { task, skill, timeout, userId, appName } = req.body || {};
+    const safeTask = String(task || '').trim();
+    if (!safeTask) {
+      res.status(400).json({ ok: false, error: 'task is required' });
+      return;
+    }
+
+    const safeAppName = String(appName || '').trim();
+    const safeUserId = String(userId || '').trim();
+    const workspacePath = safeAppName && safeUserId ? buildWorkspacePath(safeUserId, safeAppName) : undefined;
+    const appUrl = safeAppName && safeUserId ? buildAppUrl(safeUserId, safeAppName) : undefined;
+
+    const result = await enqueueOpenCodeTerminalTask({
+      task: safeTask,
+      skill,
+      timeout: clampTerminalTimeout(timeout),
+      appName: safeAppName || undefined,
+      workspacePath,
+      appUrl,
+    });
+
+    const resolvedAppUrl = (safeAppName && safeUserId && workspacePath && fs.existsSync(path.join(workspacePath, 'index.html')))
+      ? appUrl
+      : undefined;
+
+    res.json({
+      ...result,
+      platform: 'opencode',
+      appUrl: resolvedAppUrl,
+      appWorkspace: workspacePath,
+    });
+  } catch (err: any) {
+    console.error('[Open Terminal] error:', err.message?.slice(0, 200));
+    res.status(500).json({
+      ok: false,
+      error: err.message?.slice(0, 500) || 'Open terminal skills execution failed',
+      platform: 'opencode',
+    });
+  }
+});
 
 async function callOllama(model: string, systemPrompt: string, userPrompt: string, timeoutSec: number, maxTokens = 256): Promise<{ content: string; model: string }> {
   const ollamaRes = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {

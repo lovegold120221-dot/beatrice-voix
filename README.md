@@ -1,6 +1,15 @@
-# Voxx-Zero — Belgian AI Voice Agent
+# Beatrice — AI Voice Agent by Eburon AI
 
 **Beatrice** is a real-time voice AI agent powered by the **Eburon Live API** with WhatsApp integration, multi-language support, persistent memory, a Cerebras-powered browser automation agent, and 10 specialized Belgian administrative tools. Built by [Eburon AI](https://eburon.ai).
+
+<p align="center">
+  <a href="https://whatsapp.eburon.ai">
+    <img src="https://img.shields.io/badge/Live%20App-whatsapp.eburon.ai-8A2BE2?style=for-the-badge" alt="Live App">
+  </a>
+  <a href="https://github.com/lovegold120221-dot/turbo-dollop">
+    <img src="https://img.shields.io/badge/GitHub-turbo--dollop-181717?style=for-the-badge&logo=github" alt="GitHub">
+  </a>
+</p>
 
 ---
 
@@ -17,7 +26,7 @@ Frontend (React 19 + Vite)
 Backend (Express + tsx)
   ├─ Baileys WhatsApp Manager (server/whatsapp.ts)
   ├─ Belgian Admin Tools (server/belgian-tools.ts)
-  ├─ Sandbox Sub-Agent Runner
+  ├─ Sandbox Sub-Agent Runner (OpenCode CLI)
   ├─ Cerebras Browser Automation
   ├─ Ollama LLM Proxy (SSE streaming)
   └─ Web Glance (DuckDuckGo)
@@ -37,7 +46,7 @@ Data Layer
 |---|---|
 | **Frontend** | React 19, Vite 6, Tailwind CSS v4, motion (Framer Motion) |
 | **Backend** | Express 4, tsx runtime, Node 22+ |
-| **AI Voice** | Eburon Voice |
+| **AI Voice** | Eburon Voice (Live API) |
 | **Auth** | Firebase Auth (Google OAuth) |
 | **Database** | Supabase (PostgreSQL + Storage) |
 | **WhatsApp** | Baileys (`@whiskeysockets/baileys`) |
@@ -56,6 +65,7 @@ Data Layer
 - **Multi-Language** — 147 languages, Flemish (nl-BE) primary, voice-driven language switching
 - **Full Dark + Light Themes** — CSS custom properties, 70+ override rules
 - **Content Filtering Toggle** — Disable censorship via Profile settings
+- **Progressive Web App** — Full PWA with offline support, install prompt, and automatic update detection with version tracking (v1.0.0)
 
 ---
 
@@ -69,8 +79,8 @@ Data Layer
 
 ### Local Development
 ```bash
-git clone https://github.com/lovegold120221-dot/xero.git
-cd xero
+git clone https://github.com/lovegold120221-dot/turbo-dollop.git
+cd turbo-dollop
 npm install
 
 cp .env.example .env
@@ -94,33 +104,63 @@ Run in Supabase SQL Editor:
 ```
 src/
 ├── components/
-│   ├── BeatriceAgent.tsx    # Main agent: voice, tools, session lifecycle
-│   ├── ChatPage.tsx         # Text chat with sandbox viewer
-│   ├── VideoPage.tsx        # Camera + screen sharing
-│   ├── ProfilePage.tsx      # Persona, language, memory settings
-│   ├── AuthPage.tsx         # Login / register
-│   ├── WhatsApp*.tsx        # Pairing, onboarding, settings, chat list
-│   └── DocumentViewer.tsx   # Supabase-backed output viewer
+│   ├── BeatriceAgent.tsx       # Main agent: voice, tools, session lifecycle
+│   ├── ChatPage.tsx            # Text chat with sandbox viewer
+│   ├── VideoPage.tsx           # Camera + screen sharing
+│   ├── ProfilePage.tsx         # Persona, language, memory settings
+│   ├── AuthPage.tsx            # Login / register
+│   ├── WhatsApp*.tsx           # Pairing, onboarding, settings, chat list
+│   ├── PWAInstallPrompt.tsx    # PWA install banner
+│   ├── PWAUpdatePrompt.tsx     # PWA update banner for installed users
+│   ├── DocumentViewer.tsx      # Supabase-backed output viewer
+│   └── ...
+├── hooks/
+│   └── usePWA.ts               # PWA lifecycle hook (install/update/version)
 ├── lib/
-│   ├── audio.ts             # AudioStreamer + AudioRecorder
-│   ├── supabase.ts          # Supabase client
-│   └── whatsappClient.ts    # WhatsApp API client
-├── constants.ts             # 147-language LANGUAGES array
-├── firebase.ts              # Firebase init
-└── index.css                # Tailwind v4 + theme system
+│   ├── audio.ts                # AudioStreamer + AudioRecorder
+│   ├── supabase.ts             # Supabase client
+│   └── whatsappClient.ts       # WhatsApp API client
+├── version.ts                  # App versioning (VERSION_KEY, APP_VERSION)
+├── constants.ts                # 147-language LANGUAGES array
+├── firebase.ts                 # Firebase init
+└── index.css                   # Tailwind v4 + theme system
 
 server/
-├── index.ts                 # Express: all API routes
-├── whatsapp.ts              # WhatsAppManager (Baileys)
-├── whatsapp-tools.ts        # Permission-gated tool dispatch
-├── belgian-tools.ts         # 10 Belgian admin tools
-└── supabase.ts              # Server Supabase client
+├── index.ts                    # Express: all API routes
+├── whatsapp.ts                 # WhatsAppManager (Baileys)
+├── whatsapp-tools.ts           # Permission-gated tool dispatch
+├── belgian-tools.ts            # 10 Belgian admin tools
+└── supabase.ts                 # Server Supabase client
 
-functions/src/index.ts       # Firebase Cloud Function proxy to VPS
+functions/src/index.ts          # Firebase Cloud Function proxy to VPS
 scripts/
-├── cerebras_browser.py      # Browser-Use + Cerebras wrapper
-└── setup-cerebras.sh        # Python dep installer
+├── cerebras_browser.py         # Browser-Use + Cerebras wrapper
+└── setup-cerebras.sh           # Python dep installer
+
+public/
+├── manifest.json               # PWA manifest
+├── sw.js                       # Service worker (versioned caching, update detection)
+└── icon-eburon.svg             # App icon
 ```
+
+---
+
+## PWA System
+
+Beatrice is a fully installable Progressive Web App with smart version management:
+
+- **Install Prompt** — On first visit (or if not installed), a polished install banner appears at the bottom of the screen
+- **Update Detection** — When already installed, the service worker checks its version against `APP_VERSION` (from `src/version.ts`). If a newer version exists, an "Update Available" banner prompts the user to refresh
+- **Version Tracking** — After successful install, the version is stored in `localStorage` at `beatrice_app_version`. Subsequent visits compare this against the current `APP_VERSION`
+- **Cache Management** — The service worker registers at `/sw.js` and caches all static assets with version-aware cache names
+
+### Versioning
+The app version is maintained in `src/version.ts`:
+```ts
+export const APP_VERSION = '1.0.0';  // Bump on every deploy
+export const APP_BUILD = 1;           // Incremental build number
+```
+To push a new version to all installed users, bump `APP_VERSION` and rebuild.
 
 ---
 

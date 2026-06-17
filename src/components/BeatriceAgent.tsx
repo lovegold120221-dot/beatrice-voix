@@ -5,7 +5,7 @@ import { supabase, handleDbError } from '../lib/supabase';
 import { LiveServerMessage, Modality, Type, FunctionDeclaration } from '@google/genai';
 import { AudioRecorder, AudioStreamer } from '../lib/audio';
 import { listKnowledgeFiles, fetchKnowledgeFileContent } from '../lib/supabaseStorage';
-import { Loader2, Mic, Square, Check, Settings, X, Save, Video, MessageSquare, Monitor, ChevronDown, Moon, Sun, Mail, Calendar, ListChecks, HardDrive, Users, FileText, MapPin, Building2, Shield, Calculator, Languages, Heart, Scale, Train, Globe, FileOutput, Network, Zap, Search, GitBranch, Cpu, Fingerprint } from 'lucide-react';
+import { Loader2, Mic, Square, Check, Settings, X, Save, Video, MessageSquare, Monitor, ChevronDown, Moon, Sun, Mail, Calendar, ListChecks, HardDrive, Users, FileText, MapPin, Building2, Shield, Calculator, Languages, Heart, Scale, Train, Globe, FileOutput, Network, Zap, Search, GitBranch, Cpu, Fingerprint, Terminal } from 'lucide-react';
 import { ToggleSwitch } from './ToggleSwitch';
 import { AnimatePresence, motion } from 'motion/react';
 import { UnifiedTranscript } from './UnifiedTranscript';
@@ -652,6 +652,29 @@ IMPORTANT: When you speak about ANY of this content, use "we", "us", "our", or "
 - Our mission is to deliver sovereign voice AI that keeps data on the customer's perimeter, with zero vendor lock-in.
 - Our company was founded by Jo Lernout and led by Master E as our Chief Engineer.
 - Our name "Eburon" derives from the Eburones, an ancient Belgian tribe, symbolizing sovereignty and rootedness in Belgian heritage.
+
+--- OUR EBURON API FOR VOICE AGENTS ---
+- Our public Eburon API base URL is https://api.eburon.ai. If asked for the API URL, answer: api.eburon.ai.
+- The API is for realtime and near-realtime voice-agent stacks: voice activity detection, streaming speech-to-text, turn management, Eburon reasoning, tool routing, text-to-speech, and speaker output.
+- It supports inbound support agents, outbound voice callers, appointment schedulers, concierge assistants, multilingual assistants, internal command agents, SIP/PBX, WebRTC, and browser microphone pipelines.
+- Our recommended API integration is backend-only: keep Eburon keys and actual model IDs server-side, expose safe model aliases to clients, and never let the frontend call protected Eburon endpoints directly.
+- Voice-agent integrations should probe live endpoints before production because the root page is not API documentation; likely routes include /v1/models, /api/tags, /models, /v1/chat/completions, /api/chat, /api/generate, and embeddings endpoints.
+- For spoken conversation, prefer chat-style requests with a stable system persona, conversation history, latest user utterance, tool instructions, low-latency settings, and concise response limits.
+- For voice streaming, chunk model output into stable phrases before sending to TTS, stop TTS immediately on barge-in, abort in-flight requests on interruption, and ask one question at a time.
+- Frontend-visible aliases are codemax for coding or structured reasoning, orbit for the general voice-agent brain, echo for fast conversation, and vision for multimodal work; backend services map these aliases to actual deployed models.
+- This Beatrice app showcases Eburon features through live voice conversation, memory, WhatsApp integration, Belgian business tools, document/workspace generation, browser/worker automation, and knowledge-base personalization.
+
+--- OUR ORBIT MEETING APP ---
+- Orbit Meeting is our real-time AI translation meeting app at https://meeting.eburon.ai. If asked for the meeting app URL, answer: meeting.eburon.ai.
+- Orbit Meeting lets people run multilingual meetings where speech is transcribed, translated, and spoken back in the listener's selected language.
+- The main flows are login, password reset, signup, dashboard, create meeting, join meeting, schedule meeting, lobby language/device setup, live meeting room, settings, and sign out.
+- Dashboard actions are Create, Join, and Schedule Meeting. Scheduling creates an invite link and can share via Email, Gmail, WhatsApp, or copy-to-clipboard.
+- The lobby asks users to pick the language they will speak and hear, edit their display name, toggle microphone/camera/screen share, join the call, or copy the invite link.
+- The live meeting room includes translation target language, translator mute, copy meeting link, participant tiles, microphone, video, speaker, People, Chat, Share, Translate, Record, Breakout, React, Invite, Settings, History, More, and Leave controls.
+- The translation panel includes target language, AI voice choice, mute translator, original transcription, and translated output.
+- Settings live at https://meeting.eburon.ai/settings and include General, Preferences, Audio, Video, Translation, Glossary, and Recording tabs.
+- Orbit Meeting is a PWA: users can install it on mobile or desktop, use it in standalone mode, and keep the app icon on their home screen.
+- When asked about Orbit Meeting features, explain it as Eburon's meeting product for breaking language barriers with real-time speech recognition, translation, AI voice synthesis, video conferencing, chat, recording, glossary, and meeting history.
 
 --- OUR FOUNDER: JO LERNOUT (Founding Chairman) ---
 - Full name: Jozef Albert "Jo" Lernout. We call him Jo or Joe.
@@ -2013,6 +2036,33 @@ export function BeatriceAgent({
     } else if (toolName === 'transcribe_audio' && result?.transcript) {
       const escapedTranscript = result.transcript.replace(/[&<>"']/g, (c: string) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c] || c));
       finalHtml = `<h1>🎤 Audio Transcription</h1><div style="background:#1a1b1f; border:1px solid #1f2025; padding:20px; border-radius:18px; font-family:monospace; font-size:13px; color:#f0e6df; white-space:pre-wrap; overflow-x:auto; max-height:500px; overflow-y:auto; line-height:1.8;"><pre style="margin:0; font-family:inherit; white-space:pre-wrap; word-break:break-word;">${escapedTranscript}</pre></div>`;
+    } else if (toolName === 'open_terminal_skills' && result?.ok) {
+      const stdoutText = result.stdout || '';
+      const appUrl = result.appUrl || '';
+      const provider = result.provider || 'opencode';
+      const model = result.model || '';
+      const fallbackNote = result.fallback ? '<p style="font-size:11px; color:#d0a78b; margin-bottom:8px;">(Ollama fallback used — primary model unavailable)</p>' : '';
+      const appUrlBlock = appUrl ? `
+        <div style="background:rgba(208,167,139,0.1); border:1px solid #d0a78b; padding:20px; border-radius:14px; margin-bottom:16px; text-align:center;">
+          <p style="font-size:11px; color:#64748b; margin-bottom:8px; text-transform:uppercase; letter-spacing:1px;">Your App is Live</p>
+          <p style="font-size:14px; color:#d0a78b; word-break:break-all; margin-bottom:12px;">${appUrl}</p>
+          <button onclick="navigator.clipboard.writeText('${appUrl}');this.textContent='Copied!';setTimeout(()=>this.textContent='Copy URL',2000)" style="background:#d0a78b; color:#000; border:none; padding:8px 20px; border-radius:8px; font-size:12px; font-weight:bold; cursor:pointer;">Copy URL</button>
+          <a href="${appUrl}" target="_blank" rel="noopener" style="display:inline-block; margin-left:8px; background:transparent; color:#d0a78b; border:1px solid #d0a78b; padding:8px 20px; border-radius:8px; font-size:12px; font-weight:bold; cursor:pointer; text-decoration:none;">Open App</a>
+        </div>
+      ` : '';
+      const escapedStdout = stdoutText.replace(/[&<>"']/g, (c: string) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c] || c));
+      finalHtml = `
+        <h1>🖥️ Open Terminal Result</h1>
+        <p style="font-size:11px; color:#64748b; margin-bottom:16px;">Provider: ${provider} • Model: ${model}</p>
+        ${fallbackNote}
+        ${appUrlBlock}
+        <div style="background:#1a1b1f; border:1px solid #1f2025; padding:20px; border-radius:18px; font-family:monospace; font-size:12px; color:#d0a78b; white-space:pre-wrap; overflow-x:auto; max-height:400px; overflow-y:auto;"><pre style="margin:0; font-family:inherit; white-space:pre-wrap; word-break:break-word;">${escapedStdout || '(no output)'}</pre></div>
+      `;
+      sandboxTitle = 'Open Terminal Result';
+    } else if (toolName === 'open_terminal_skills') {
+      const errorMsg = result?.error || 'Unknown error';
+      finalHtml = `<h1>🖥️ Open Terminal Error</h1><div style="background:rgba(244,67,54,0.1); border:1px solid #f44336; padding:16px; border-radius:12px; color:#f44336;"><p>${errorMsg}</p></div><div style="margin-top:16px; background:#1a1b1f; border:1px solid #1f2025; padding:16px; border-radius:12px; font-family:monospace; font-size:11px; color:#94a3b8; white-space:pre-wrap; max-height:300px; overflow-y:auto;"><pre style="margin:0; font-family:inherit;">${result?.stdout || ''}\n\n${result?.stderr || ''}</pre></div>`;
+      sandboxTitle = 'Open Terminal — Error';
     } else {
       finalHtml = `<h1>🛠️ System Result</h1><div style="background:#1a1b1f; border:1px solid #1f2025; padding:20px; border-radius:18px; font-family:monospace; font-size:12px; color:#d0a78b; white-space:pre-wrap; overflow-x:auto;">${JSON.stringify(result, null, 2)}</div>`;
     }
@@ -2893,6 +2943,44 @@ You have access to run_sandbox_task for complex tasks that need heavy processing
 - The sandbox has its own context window, so it can handle longer tasks without bloating your conversation memory.
 - The sandbox runs on the local VPS with a cascade: local Ollama models (fast, zero-latency) for light tasks, Eburon Core for heavy/complex tasks, and Cerebras API for browser automation. You do not need to worry about which — just delegate and I'll handle it.
 
+OPEN TERMINAL SKILLS GUIDANCE:
+You have access to open_terminal_skills for running tasks through the local OpenCode CLI — a powerful AI coding assistant on this VPS.
+
+WHEN TO USE open_terminal_skills:
+- The user asks you to build an app, create a website, or generate a live tool.
+- The user asks you to inspect, modify, or analyze the repository code.
+- The user asks you to run a terminal command, script, or dev tool.
+- The user mentions "use OpenCode", "terminal task", "run this", or "build me a".
+- The user wants a live, hosted result they can open in a browser.
+
+HOW TO BUILD APPS WITH open_terminal_skills:
+- Always provide an "appName" — a short, URL-safe name for the app (e.g. "todo-list", "calculator", "landing-page").
+- The app will be generated in /data/beatrice-workspace/{safe-user-id}/{appName}/ on this VPS.
+- The app MUST be a standalone client-side HTML/CSS/JS app. No server, no build steps, no framework installs.
+- After generation, the app is served live at: https://whatsapp.eburon.ai/beatrice-workspace/{safe-user-id}/{appName}/
+- Write complete, polished code. Use inline CSS/JS or absolute CDN URLs (Font Awesome, Google Fonts, Tailwind CDN).
+- Create directories and write files using terminal commands: mkdir -p, cat with heredoc, or tee.
+- Example task: "Create an app called 'color-picker' in /data/beatrice-workspace/{safe-user-id}/color-picker with index.html that has a full-featured color picker using only client-side code."
+- After the task completes, I will receive an appUrl. Present it to the user as: "Your app is live at: [URL]" with a prominent link.
+
+HOW TO USE OPENCODE FOR CODING TASKS:
+- For code analysis, bug fixes, or feature requests on the repository: describe the task clearly and include file paths.
+- For general terminal work: provide the exact command or describe what you need done.
+- For research/investigation: ask OpenCode to inspect specific files, search for patterns, or find issues.
+- Always provide enough context so the OpenCode agent can complete the task autonomously.
+
+CAPABILITIES OF OPENCODE:
+- OpenCode can read/write files, run shell commands, search the codebase, install npm packages, run git commands, and more.
+- It uses the deepseek-v4-flash-free model by default — fast and capable for most coding tasks.
+- It has access to the full repository at /app on this VPS.
+- Skills available: dokploy-deploy (for Dokploy deployment tasks).
+
+IMPORTANT RULES:
+- Do not use open_terminal_skills for normal chat, WhatsApp, Google services, browser automation, or document generation — those have dedicated tools.
+- Provide a precise task description. Include file paths, expected output, and constraints when relevant.
+- Summarize the terminal result from stdout/stderr naturally. If the task fails, report the failure and the useful error text.
+- When an appUrl is returned, always present it prominently to the user with a clickable link.
+
 BROWSER AGENT GUIDANCE:
 You have access to cerebras_browser_task for web browsing, data extraction, form filling, and any task that requires interacting with a live website.
 - Use cerebras_browser_task when the user says "go to this website", "find information about", "search for", "fill out this form", "extract data from", or any request that needs a real browser.
@@ -3672,6 +3760,20 @@ ${historyContext}
                       timeout: { type: Type.NUMBER, description: "Maximum execution time in seconds (10-300, default 60)." }
                     },
                     required: ["task_description"]
+                  }
+                },
+                {
+                  name: "open_terminal_skills",
+                  description: "Run a user-approved repository terminal task through the local OpenCode CLI platform. Use this when the user explicitly asks to use OpenCode, run an OpenCode skill, inspect the repo from a terminal agent, or execute a terminal-oriented task. When the user asks you to build an app or create a website, always include an appName so the result gets a live preview URL.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      task: { type: Type.STRING, description: "Precise terminal task for OpenCode to perform inside the repository. Include expected output or constraints. For app generation, include the full path where files should be saved." },
+                      appName: { type: Type.STRING, description: "Short URL-safe name for the generated app (e.g. 'todo-list', 'calculator'). Required when building apps. The app will be served live at https://whatsapp.eburon.ai/beatrice-workspace/{userId}/{appName}/." },
+                      skill: { type: Type.STRING, description: "Optional OpenCode skill name to request, such as 'dokploy-deploy'." },
+                      timeout: { type: Type.NUMBER, description: "Maximum execution time in seconds (10-300, default 60). Use higher values for app generation." }
+                    },
+                    required: ["task"]
                   }
                 },
                 {
@@ -4460,6 +4562,39 @@ ${historyContext}
                         result = { ok: true, result: data.result, agent: data.agent || 'backend' };
                       } catch (e: any) {
                         result = { ok: false, error: e.message || 'Sandbox task failed' };
+                      }
+                    } else if (callName === 'open_terminal_skills') {
+                      const args = call.args as any;
+                      try {
+                        const resp = await fetch('/api/terminal/open-skills', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            userId: user.uid,
+                            task: args.task || '',
+                            appName: args.appName || '',
+                            skill: args.skill || '',
+                            timeout: args.timeout || 60,
+                          }),
+                        });
+                        const data = await resp.json();
+                        if (!resp.ok) throw new Error(data.error || `Open terminal error (${resp.status})`);
+                        result = {
+                          ok: !!data.ok,
+                          platform: data.platform || 'opencode',
+                          command: data.command || 'opencode run',
+                          cwd: data.cwd,
+                          stdout: data.stdout || '',
+                          stderr: data.stderr || '',
+                          exitCode: data.exitCode,
+                          timedOut: !!data.timedOut,
+                          truncated: !!data.truncated,
+                          error: data.error,
+                          appUrl: data.appUrl || '',
+                          appWorkspace: data.appWorkspace || '',
+                        };
+                      } catch (e: any) {
+                        result = { ok: false, platform: 'opencode', error: e.message || 'Open terminal skills task failed' };
                       }
                     } else if (callName === 'cerebras_browser_task') {
                       const args = call.args as any;
@@ -5413,6 +5548,7 @@ ${historyContext}
                 { key: 'sb_website', label: 'Website Generator', desc: 'Full HTML/CSS websites with Pixabay images', icon: Globe },
                 { key: 'sb_documents', label: 'Document Generator', desc: '12 professional templates (invoice, NDA, contract, etc.)', icon: FileOutput },
                 { key: 'sb_sandbox', label: 'Sub-Agent Cascade', desc: 'Complex multi-step task delegation', icon: Network },
+                { key: 'sb_terminal', label: 'Open Terminal Skills', desc: 'OpenCode CLI repository task runner', icon: Terminal },
                 { key: 'sb_browser', label: 'Browser Automation', desc: 'Cerebras + Browser-Use web automation', icon: Monitor },
                 { key: 'sb_cerebras', label: 'Cerebras Chat', desc: 'High-speed text generation (120B param)', icon: Zap },
                 { key: 'sb_hermes', label: 'Hermes Multitask', desc: 'Chain-of-thought + GitHub API + code generation', icon: GitBranch },

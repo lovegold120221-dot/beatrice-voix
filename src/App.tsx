@@ -17,6 +17,9 @@ import { BeatriceAgent } from './components/BeatriceAgent';
 import { WhatsAppPortal } from './components/WhatsAppPortal';
 import { WhatsAppOnboarding } from './components/WhatsAppOnboarding';
 import { PWAInstallPrompt } from './components/PWAInstallPrompt';
+import { PWAUpdatePrompt } from './components/PWAUpdatePrompt';
+import { usePWA } from './hooks/usePWA';
+import { APP_VERSION } from './version';
 
 /* ── Theme system ── */
 type Theme = 'dark' | 'light';
@@ -46,6 +49,8 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [googleToken, setGoogleToken] = useState<string | null>(null);
   const [showEntryFlow, setShowEntryFlow] = useState(true);
+
+  const pwa = usePWA();
 
   // Apply theme class to <html> on mount and changes
   useEffect(() => { applyTheme(theme); }, [theme]);
@@ -265,7 +270,16 @@ export default function App() {
         theme={theme}
         onToggleTheme={toggleTheme}
       />
-      <PWAInstallPrompt />
+      <PWAInstallPrompt
+        visible={pwa.mode === 'install'}
+        onInstall={pwa.install}
+        onDismiss={pwa.dismissInstall}
+      />
+      <PWAUpdatePrompt
+        visible={pwa.mode === 'update'}
+        onDismiss={pwa.dismissUpdate}
+        onUpdate={pwa.triggerUpdate}
+      />
     </>
   );
 }
