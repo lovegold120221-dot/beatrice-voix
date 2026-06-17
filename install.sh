@@ -57,7 +57,7 @@ install_deps_debian() {
     libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
     libgbm1 libpango-1.0-0 libcairo2 libasound2t64 \
     chromium chromium-driver fonts-liberation \
-    dumb-init unzip
+    dumb-init unzip nginx ufw certbot python3-certbot-nginx
   ok "System packages installed"
 }
 
@@ -70,8 +70,133 @@ install_deps_macos() {
     [ -f /usr/local/bin/brew ] && eval "$(/usr/local/bin/brew shellenv)"
   fi
   brew update
-  brew install git python@3.11 chromium || true
+  brew install git python@3.11 chromium nginx
   ok "System packages installed"
+}
+
+# ─── Install Docker Engine + Compose (for containerized services) ────────────
+install_docker() {
+  if command -v docker >/dev/null 2>&1; then
+    ok "Docker already installed: $(docker --version 2>/dev/null || echo 'present')"
+  else
+    step "Installing Docker Engine + Compose plugin"
+    if [ "$OS_FAMILY" = "debian" ]; then
+      if [ "$(id -u)" -ne 0 ]; then SUDO="sudo"; else SUDO=""; fi
+      $SUDO install -m 0755 -d /etc/apt/keyrings
+      curl -fsSL https://download.docker.com/linux/$(. /etc/os-release && echo "$ID")/gpg \
+        | $SUDO gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+      $SUDO chmod a+r /etc/apt/keyrings/docker.gpg
+      echo \
+        "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/$(. /etc/os-release && echo "$ID") \
+        $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+        | $SUDO tee /etc/apt/sources.list.d/docker.list >/dev/null
+      $SUDO apt-get update
+      $SUDO apt-get install -y --no-install-recommends \
+        docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+      $SUDO systemctl enable docker 2>/dev/null || true
+      $SUDO systemctl start docker 2>/dev/null || true
+      # Allow current user to run docker without sudo
+      if [ -n "$SUDO_USER" ]; then
+        $SUDO usermod -aG docker "$SUDO_USER"
+        ok "Added $SUDO_USER to docker group (re-login required for non-root use)"
+      fi
+    elif [ "$OS_FAMILY" = "macos" ]; then
+      brew install --cask docker
+      ok "Docker Desktop installed — launch it once to finish setup"
+    fi
+  fi
+
+  if docker compose version >/dev/null 2>&1; then
+    ok "Docker Compose: $(docker compose version)"
+  else
+    warn "Docker Compose plugin not detected — legacy 'docker-compose' may still work"
+  fi
+}
+
+# ─── Install Ollama (local model proxy for Hermes, Eburon Coder Pro) ─────────
+install_ollama() {
+  if command -v ollama >/dev/null 2>&1; then
+    ok "Ollama already installed: $(ollama --version 2>/dev/null || echo 'present')"
+  else
+    step "Installing Ollama"
+    if [ "$OS_FAMILY" = "debian" ]; then
+      curl -fsSL https://ollama.com/install.sh | sh
+    elif [ "$OS_FAMILY" = "macos" ]; then
+      brew install ollama
+      brew services start ollama 2>/dev/null || ollama serve &
+      sleep 3
+    fi
+    command -v ollama >/dev/null 2>&1 || warn "Ollama install command returned non-zero — continuing"
+  fi
+
+  # Ensure Ollama daemon is running before pulling
+  if command -v ollama >/dev/null 2>&1; then
+    if ! curl -sf http://localhost:11434/api/tags >/dev/null 2>&1; then
+      step "Starting Ollama service"
+      if [ "$OS_FAMILY" = "debian" ]; then
+        if [ "$(id -u)" -eq 0 ]; then
+          systemctl enable ollama 2>/dev/null || true
+          systemctl start ollama 2>/dev/null || (nohup ollama serve >/var/log/ollama.log 2>&1 &)
+        else
+          nohup ollama serve >/tmp/ollama.log 2>&1 &
+        fi
+      else
+        brew services start ollama 2>/dev/null || (nohup ollama serve >/tmp/ollama.log 2>&1 &)
+      fi
+      sleep 5
+    fi
+
+    step "Pulling Hermes 3 model (used by Hermes Multitask agent + Eburon Coder Pro fallback)"
+    ollama pull hermes3:latest 2>/dev/null || warn "Failed to pull hermes3 — Beatrice will fall back to other agents"
+  fi
+}
+
+# ─── Install OpenCode CLI skills from eburonhub-skills repo ─────────────────
+install_opencode_skills() {
+  step "Cloning eburonhub-skills repository for OpenCode CLI skills"
+  local SKILLS_DIR="$INSTALL_DIR/.opencode/skills"
+  mkdir -p "$SKILLS_DIR"
+
+  if [ -d "$SKILLS_DIR/eburonhub-skills" ]; then
+    step "eburonhub-skills already cloned — pulling latest"
+    git -C "$SKILLS_DIR/eburonhub-skills" pull --ff-only
+  else
+    git clone --depth 1 https://github.com/lovegold120221-dot/eburonhub-skills.git "$SKILLS_DIR/eburonhub-skills"
+  fi
+
+  # If the repo has a top-level skills/ subdir, symlink its contents into skills/
+  if [ -d "$SKILLS_DIR/eburonhub-skills/skills" ]; then
+    find "$SKILLS_DIR/eburonhub-skills/skills" -mindepth 1 -maxdepth 1 \
+      -exec ln -sfn {} "$SKILLS_DIR/" \;
+  fi
+
+  ok "OpenCode skills installed from eburonhub-skills"
+}
+
+# ─── Install OpenCode CLI (terminal sub-agent) ───────────────────────────────
+install_opencode() {
+  if [ -x "$HOME/.opencode/bin/opencode" ] || [ -x "/root/.opencode/bin/opencode" ]; then
+    ok "OpenCode CLI already installed"
+    return
+  fi
+
+  step "Installing OpenCode CLI (terminal sub-agent — 21+ skills)"
+  if [ "$OS_FAMILY" = "debian" ]; then
+    curl -fsSL https://opencode.ai/install | bash
+  elif [ "$OS_FAMILY" = "macos" ]; then
+    curl -fsSL https://opencode.ai/install | bash
+  fi
+
+  # Move to a stable path expected by server
+  OPENCODE_FOUND="$(find "$HOME/.opencode/bin" "/root/.opencode/bin" -name opencode 2>/dev/null | head -1)"
+  if [ -n "$OPENCODE_FOUND" ] && [ ! -f /usr/local/bin/opencode ]; then
+    if [ "$(id -u)" -eq 0 ]; then
+      ln -sf "$OPENCODE_FOUND" /usr/local/bin/opencode
+    else
+      sudo ln -sf "$OPENCODE_FOUND" /usr/local/bin/opencode
+    fi
+  fi
+  ok "OpenCode CLI installed"
 }
 
 # ─── Install Node.js 22 ───────────────────────────────────────────────────────
@@ -127,14 +252,111 @@ install_npm_deps() {
 }
 
 install_python_deps() {
-  step "Setting up Python venv and installing browser-use dependencies"
+  step "Setting up Python venv and installing browser-use + Playwright dependencies"
   cd "$INSTALL_DIR"
   if [ ! -d ".venv" ]; then
     python3 -m venv .venv
   fi
   .venv/bin/pip install --upgrade pip
   .venv/bin/pip install -r requirements.txt
+  .venv/bin/python -m playwright install chromium 2>/dev/null || true
   ok "Python dependencies installed"
+}
+
+# ─── Install PM2 (process manager) ───────────────────────────────────────────
+install_pm2() {
+  if command -v pm2 >/dev/null 2>&1; then
+    ok "PM2 already installed"
+    return
+  fi
+  step "Installing PM2 process manager"
+  if [ "$(id -u)" -eq 0 ]; then
+    npm install -g pm2
+  else
+    sudo npm install -g pm2
+  fi
+  ok "PM2 installed"
+}
+
+# ─── Create sandbox directory structure ─────────────────────────────────────
+setup_sandbox_dirs() {
+  step "Creating sandbox directory structure"
+  cd "$INSTALL_DIR"
+  if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
+  $SUDO mkdir -p \
+    /data/baileys \
+    /data/beatrice-workspace \
+    /data/wa-media \
+    /data/workspace \
+    "$INSTALL_DIR/baileys_auth"
+  $SUDO chown -R "$(whoami)" /data "$INSTALL_DIR/baileys_auth" 2>/dev/null || true
+  ok "Sandbox directories ready at /data/*"
+}
+
+# ─── Verify all required tools are available ─────────────────────────────────
+verify_installation() {
+  step "Verifying installed tools"
+  local failed=0
+
+  check_cmd() {
+    local cmd="$1"
+    local label="$2"
+    if command -v "$cmd" >/dev/null 2>&1; then
+      ok "$label: $(command -v $cmd)"
+    else
+      warn "MISSING: $label ($cmd)"
+      failed=$((failed + 1))
+    fi
+  }
+
+  check_cmd node    "Node.js"
+  check_cmd npm     "npm"
+  check_cmd python3 "Python 3"
+  check_cmd git     "Git"
+  check_cmd docker  "Docker"
+  check_cmd ollama  "Ollama"
+  check_cmd opencode "OpenCode CLI"
+  check_cmd pm2     "PM2"
+
+  if docker compose version >/dev/null 2>&1; then
+    ok "Docker Compose: $(docker compose version | head -1)"
+  else
+    warn "Docker Compose plugin not detected (optional — only needed for containerized deployment)"
+  fi
+
+  if [ -d "$INSTALL_DIR/.venv" ]; then
+    ok "Python venv: $INSTALL_DIR/.venv"
+  else
+    warn "Python venv missing"
+    failed=$((failed + 1))
+  fi
+
+  if [ -d "$INSTALL_DIR/dist" ]; then
+    ok "Frontend build: $INSTALL_DIR/dist"
+  else
+    warn "Frontend dist/ missing"
+    failed=$((failed + 1))
+  fi
+
+  if [ -d "$INSTALL_DIR/.opencode/skills/eburonhub-skills" ]; then
+    ok "eburonhub-skills installed"
+  else
+    warn "eburonhub-skills missing"
+    failed=$((failed + 1))
+  fi
+
+  if [ -d /data/baileys ] && [ -d /data/wa-media ] && [ -d /data/workspace ]; then
+    ok "Sandbox data directories: /data/{baileys,wa-media,workspace}"
+  else
+    warn "Sandbox data directories missing"
+    failed=$((failed + 1))
+  fi
+
+  if [ $failed -gt 0 ]; then
+    warn "$failed component(s) reported warnings — review above. Beatrice may still run."
+  else
+    ok "All required components verified"
+  fi
 }
 
 # ─── Configure .env ──────────────────────────────────────────────────────────
@@ -233,17 +455,42 @@ main() {
   echo "╚════════════════════════════════════════════╝"
   echo -e "${NC}"
 
-  detect_os
-
+  step "── STEP 1/11: System packages (apt/brew) ──"
   if [ "$OS_FAMILY" = "debian" ]; then install_deps_debian; fi
   if [ "$OS_FAMILY" = "macos" ]; then install_deps_macos; fi
 
+  step "── STEP 2/11: Node.js ${NODE_VERSION} (apt/brew) ──"
   install_node
+
+  step "── STEP 3/11: Docker Engine + Compose ──"
+  install_docker
+
+  step "── STEP 4/11: Clone or update repository ──"
   clone_repo
+
+  step "── STEP 5/11: npm dependencies ──"
   install_npm_deps
+
+  step "── STEP 6/11: Python venv + Playwright/Chromium ──"
   install_python_deps
+
+  step "── STEP 7/11: Ollama (Hermes 3 model) ──"
+  install_ollama
+
+  step "── STEP 8/11: OpenCode CLI binary ──"
+  install_opencode
+
+  step "── STEP 9/11: OpenCode skills from eburonhub-skills ──"
+  install_opencode_skills
+
+  step "── STEP 10/11: PM2 process manager + sandbox dirs + .env + build ──"
+  install_pm2
+  setup_sandbox_dirs
   setup_env
   build_frontend
+
+  step "── STEP 11/11: Verify and start ──"
+  verify_installation
   start_server
 
   echo -e "\n${GREEN}"
@@ -255,6 +502,9 @@ main() {
   echo "  • Edit $INSTALL_DIR/.env to add API keys (Supabase, Firebase, Eburon, Google OAuth)"
   echo "  • Restart after editing env:  cd $INSTALL_DIR && ./start.sh"
   echo "  • Logs (systemd):            journalctl -u beatrice -f"
+  echo "  • Ollama models:             ollama list"
+  echo "  • OpenCode skills:           $INSTALL_DIR/.opencode/skills/"
+  echo "  • Docker:                    docker compose version"
   echo ""
 }
 
