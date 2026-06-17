@@ -231,7 +231,7 @@ export class AmbientConversationBed {
 export class AudioRecorder {
   private audioContext: AudioContext | null = null;
   private stream: MediaStream | null = null;
-  private processor: ScriptProcessorNode | null = null;
+  private workletNode: AudioWorkletNode | null = null;
   private silentSink: GainNode | null = null;
   private analyser: AnalyserNode | null = null;
   private dataArray: Uint8Array | null = null;
@@ -252,7 +252,6 @@ export class AudioRecorder {
         autoGainControl: true,
         sampleRate: 48000,
         channelCount: 1,
-        latency: 0,
       } 
     });
     
@@ -266,35 +265,61 @@ export class AudioRecorder {
     this.dataArray = new Uint8Array(bufferLength);
     source.connect(this.analyser);
 
-    this.processor = this.audioContext.createScriptProcessor(1024, 1, 1);
-    this.processor.onaudioprocess = (e) => {
-      if (this.killed) return; // Bail immediately if stopped
-      const input = e.inputBuffer.getChannelData(0);
-      const resampled = this.downsampleBuffer(input, this.audioContext!.sampleRate, 16000);
-      const output = new Int16Array(resampled.length);
-      for (let i = 0; i < resampled.length; i++) {
-        const s = Math.max(-1, Math.min(1, resampled[i]));
-        output[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    // AudioWorklet for capturing microphone input (replaces deprecated ScriptProcessorNode)
+    const WORKLET_CODE = `
+class AudioCaptureProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+  }
+  process(inputs) {
+    const input = inputs[0];
+    if (input && input.length > 0) {
+      const channelData = input[0];
+      if (channelData) {
+        const buffer = new Float32Array(channelData.length);
+        buffer.set(channelData);
+        this.port.postMessage({ data: buffer.buffer }, [buffer.buffer]);
       }
-      const buffer = new ArrayBuffer(output.length * 2);
-      const view = new DataView(buffer);
-      for (let i = 0; i < output.length; i++) {
-        view.setInt16(i * 2, output[i], true);
-      }
-      const bytes = new Uint8Array(buffer);
-      let binary = '';
-      for (let i = 0; i < bytes.byteLength; i++) {
-        binary += String.fromCharCode(bytes[i]);
-      }
+    }
+    return true;
+  }
+}
+registerProcessor('audio-capture-processor', AudioCaptureProcessor);
+`;
+    const blob = new Blob([WORKLET_CODE], { type: 'application/javascript' });
+    const url = URL.createObjectURL(blob);
+    await this.audioContext.audioWorklet.addModule(url);
+    URL.revokeObjectURL(url);
+
+    this.workletNode = new AudioWorkletNode(this.audioContext, 'audio-capture-processor');
+    this.workletNode.port.onmessage = (event) => {
+      if (this.killed) return;
       try {
+        const float32Array = new Float32Array(event.data.data);
+        const resampled = this.downsampleBuffer(float32Array, this.audioContext!.sampleRate, 16000);
+        const output = new Int16Array(resampled.length);
+        for (let i = 0; i < resampled.length; i++) {
+          const s = Math.max(-1, Math.min(1, resampled[i]));
+          output[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+        }
+        const buffer = new ArrayBuffer(output.length * 2);
+        const view = new DataView(buffer);
+        for (let i = 0; i < output.length; i++) {
+          view.setInt16(i * 2, output[i], true);
+        }
+        const bytes = new Uint8Array(buffer);
+        let binary = '';
+        for (let i = 0; i < bytes.byteLength; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
         this.onData(btoa(binary));
-      } catch {} // Silently ignore errors after session close
+      } catch {}
     };
     
-    this.analyser.connect(this.processor);
+    this.analyser.connect(this.workletNode);
     this.silentSink = this.audioContext.createGain();
     this.silentSink.gain.value = 0;
-    this.processor.connect(this.silentSink);
+    this.workletNode.connect(this.silentSink);
     this.silentSink.connect(this.audioContext.destination);
   }
 
@@ -340,10 +365,10 @@ export class AudioRecorder {
 
   stop() {
     this.killed = true;
-    this.onData = () => {}; // Prevent any queued onaudioprocess callbacks from calling the original handler
-    if (this.processor && this.audioContext) {
+    this.onData = () => {};
+    if (this.workletNode && this.audioContext) {
       try {
-        this.processor.disconnect();
+        this.workletNode.disconnect();
       } catch (e) {}
     }
     if (this.silentSink) {
@@ -372,7 +397,7 @@ export class AudioRecorder {
     }
     this.audioContext = null;
     this.stream = null;
-    this.processor = null;
+    this.workletNode = null;
     this.silentSink = null;
     this.analyser = null;
     this.dataArray = null;

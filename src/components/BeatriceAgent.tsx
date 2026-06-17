@@ -5216,6 +5216,7 @@ ${historyContext}
       sessionRef.current = session;
 
       audioRecorderRef.current = new AudioRecorder((base64Data) => {
+        if (!sessionHealthyRef.current || !sessionRef.current) return;
         sendAudioToLive(base64Data);
       });
 

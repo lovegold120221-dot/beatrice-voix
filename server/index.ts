@@ -85,6 +85,10 @@ app.get('/api/health', async (_req, res) => {
   res.json({ status: 'ok', provider: 'eburon_core' });
 });
 
+app.get('/api/version', (_req, res) => {
+  res.json({ version: '1.0.0', build: 1 });
+});
+
 // ── Eburon provider routes ──
 
 app.post('/api/eburon/live-session', async (req, res) => {
