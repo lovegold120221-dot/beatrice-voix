@@ -1124,6 +1124,12 @@ export function BeatriceAgent({
   const preloadedWaChatsRef = useRef<any[] | null>(null);
   const preloadedAtRef = useRef<number>(0);
 
+  // ── Sandbox live log viewer refs ──
+  const sandboxLogIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const sandboxLogsRef = useRef<string[]>([]);
+  const sandboxLogIndexRef = useRef<number>(0);
+  const sandboxScenarioNameRef = useRef<string>('');
+
   // Track previous settings values for real-time session updates
   const prevPersonaRef = useRef(personaName);
   const prevTitleRef = useRef(userTitle);
@@ -1475,441 +1481,163 @@ export function BeatriceAgent({
 </html>`;
   };
 
-  const triggerSandboxShowcase = (toolName: string, serviceName: string, taskDescription?: string) => {
-    const safeName = serviceName.replace(/_/g, ' ');
-    const taskSlug = safeName.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+  // ── Sandbox live log scenarios ──
+  const SANDBOX_LOG_SCENARIOS: Record<string, string[]> = {
+    sandbox: [
+      'Loading task specifications and context data...',
+      'Running deep analysis pass on the material...',
+      'Processing intermediate results through reasoning pipeline...',
+      'Cross-referencing findings and validating outputs...',
+      'Assembling comprehensive response with key insights...',
+      'Polishing final output for clarity and completeness...',
+    ],
+    terminal: [
+      'Setting up workspace environment and dependencies...',
+      'Scaffolding project structure and organizing assets...',
+      'Writing core application modules and components...',
+      'Building user interface and visual elements...',
+      'Integrating interactive features and functionality...',
+      'Running optimization and quality pass...',
+      'Finalizing build and preparing deployment...',
+    ],
+    browser: [
+      'Launching browser environment...',
+      'Navigating to the target web page...',
+      'Reading and analyzing page content...',
+      'Extracting structured data from the page...',
+      'Processing and formatting the extracted information...',
+    ],
+    document: [
+      'Analyzing document requirements and specifications...',
+      'Drafting content sections with precise language...',
+      'Applying template formatting and layout...',
+      'Reviewing for accuracy and completeness...',
+      'Finalizing document with professional polish...',
+    ],
+    website: [
+      'Planning site architecture and layout structure...',
+      'Building core layout components and navigation...',
+      'Styling the user interface with modern design...',
+      'Adding interactive elements and functionality...',
+      'Optimizing for performance and responsiveness...',
+      'Preparing for deployment...',
+    ],
+  };
 
-    const thinkingPage = `<!DOCTYPE html>
+  const getSandboxScenarioName = (toolName: string): string => {
+    if (toolName.includes('open_terminal') || toolName.includes('terminal')) return 'terminal';
+    if (toolName.includes('sandbox') || toolName.includes('analysis') || toolName.includes('research')) return 'sandbox';
+    if (toolName.includes('browser') || toolName.includes('cerebras')) return 'browser';
+    if (toolName.includes('document') || toolName.includes('create_doc')) return 'document';
+    if (toolName.includes('website') || toolName.includes('generate_web')) return 'website';
+    return 'sandbox';
+  };
+
+  const getScenarioLogs = (scenario: string): string[] => {
+    return SANDBOX_LOG_SCENARIOS[scenario] || SANDBOX_LOG_SCENARIOS.sandbox;
+  };
+
+  const buildLogHtml = (logs: string[], scenarioName: string, taskSlug: string): string => {
+    const logLines = logs.map((line, i) => {
+      const time = new Date();
+      const ts = `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}:${String(time.getSeconds()).padStart(2, '0')}`;
+      const isLast = i === logs.length - 1;
+      return `<div class="log-line${isLast ? ' active' : ''}"><span class="log-ts">[${ts}]</span><span class="log-msg">${line}</span>${isLast ? '<span class="log-cursor"></span>' : ''}</div>`;
+    }).join('');
+
+    return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Eburon PC - Sandbox Template Engine</title>
+  <title>Beatrice is working...</title>
   <style>
-    /* Global Reset & Base Styling */
     * { box-sizing: border-box; margin: 0; padding: 0; }
-
-    body {
-      background-color: #000000;
-      color: #f3f4f6;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      display: flex; justify-content: center; align-items: center;
-      height: 100vh; overflow: hidden;
-    }
-
-    /* Rigid Device Viewport Wrapper (Restored to original sandbox height & width) */
-    .device-container {
-      width: 100%; height: 100%;
-      background-color: #000000; display: flex; flex-direction: column;
-      position: relative; overflow: hidden; 
-    }
-
-    /* --- Main Body Wrapper --- */
-    .main-body { flex-grow: 1; display: flex; flex-direction: column; padding: 0; gap: 0; overflow: hidden; }
-
-    /* ==================================================
-       DOMINANT WORKSPACE CARD
-       ================================================== */
-    .workspace-card {
-      background: linear-gradient(180deg, #121316 0%, #16171b 100%);
-      border: none; border-radius: 0; padding: 0;
-      flex-grow: 1; display: flex; flex-direction: column;
-      position: relative; overflow: hidden; min-height: 0; 
-    }
-
-    /* Subview 1: Initial Ready State */
-    .desktop-ready-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 24px; width: 100%; height: 100%; transition: opacity 0.3s ease; }
-    .monitor-graphic { width: 160px; display: flex; flex-direction: column; align-items: center; opacity: 0.8; }
-    .monitor-screen { width: 100%; aspect-ratio: 16 / 10; background: linear-gradient(135deg, #1e2025 0%, #0d0e12 100%); border: 4px solid #3f3f46; border-radius: 8px; }
-    .monitor-inner { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
-    .monitor-inner::after { content: ""; width: 60%; height: 45%; background: rgba(255, 255, 255, 0.02); border-radius: 4px; }
-    .monitor-stand { width: 32px; height: 24px; background-color: #3f3f46; }
-    .monitor-base { width: 60px; height: 4px; background-color: #27272a; border-radius: 2px; }
-    .desktop-ready-text { color: #71717a; font-size: 0.95rem; font-weight: 500; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
-
-    /* Subview 2: Document Workspace Viewport */
-    .document-workspace { position: absolute; inset: 0; padding: 16px; display: flex; flex-direction: column; gap: 12px; opacity: 0; pointer-events: none; transform: translateY(10px); transition: opacity 0.3s ease, transform 0.3s ease; }
-
-    /* State Switchers */
-    .workspace-card.gen-mode .desktop-ready-state, .workspace-card.doc-ready .desktop-ready-state { opacity: 0; pointer-events: none; }
-    .workspace-card.gen-mode .document-workspace, .workspace-card.doc-ready .document-workspace { opacity: 1; pointer-events: auto; transform: translateY(0); }
-
-    /* Toolbar Header (Inside Workspace) */
-    .view-header { display: flex; justify-content: space-between; align-items: center; width: 100%; min-height: 32px; flex-shrink: 0; }
-    .processing-header { font-size: 0.85rem; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; color: #94a3b8; display: flex; align-items: center; gap: 6px; }
-    
-    /* Processing Animation */
-    .processing-icon { color: #3b82f6; animation: spin 3s linear infinite; }
-    @keyframes spin { 100% { transform: rotate(360deg); } }
-    .dots span { animation: dot-flash 1.4s infinite both; opacity: 0.2; }
-    .dots span:nth-child(2) { animation-delay: 0.2s; }
-    .dots span:nth-child(3) { animation-delay: 0.4s; }
-    @keyframes dot-flash { 0%, 100% { opacity: 0.2; } 50% { opacity: 1; } }
-
-    /* Document Action Buttons */
-    .doc-actions { display: none; gap: 8px; }
-    .btn { display: inline-flex; align-items: center; gap: 6px; background-color: rgba(255, 255, 255, 0.1); color: #f3f4f6; border: 1px solid rgba(255, 255, 255, 0.15); padding: 6px 12px; border-radius: 8px; font-size: 0.75rem; font-weight: 600; cursor: pointer; transition: background 0.2s, transform 0.1s; }
-    .btn:hover:not(:disabled) { background-color: rgba(255, 255, 255, 0.2); }
-    .btn:active:not(:disabled) { transform: scale(0.97); }
-    .btn.primary { background-color: #3b82f6; border-color: #3b82f6; }
-    .btn.primary:hover:not(:disabled) { background-color: #2563eb; }
-
-    .workspace-card.gen-mode .processing-header { display: flex; }
-    .workspace-card.doc-ready .processing-header { display: none; }
-    .workspace-card.doc-ready .doc-actions { display: flex; margin-left: auto; }
-
-    /* Document Preview Container */
-    .document-preview-wrapper { flex-grow: 1; display: flex; justify-content: center; align-items: center; width: 100%; position: relative; overflow: hidden; }
-    .document-skeleton { background: #ffffff; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4); transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1); position: relative; }
-
-    /* -> GENERATION MODE: Blurry loop */
-    .workspace-card.gen-mode .document-skeleton { width: 100%; max-width: 200px; padding: 16px; aspect-ratio: 3 / 4; overflow: hidden; animation: blur-loop-generation 10s ease-in-out infinite alternate; }
-    @keyframes blur-loop-generation { 0% { filter: blur(22px); opacity: 0.95; transform: scale(0.96); } 100% { filter: blur(4px); opacity: 0.55; transform: scale(1); } }
-
-    /* -> READY MODE: Expanded Document */
-    .workspace-card.doc-ready .document-skeleton { animation: none; filter: blur(0); opacity: 1; transform: scale(1); width: 100%; height: 100%; max-width: 100%; aspect-ratio: auto; overflow-y: auto; padding: 24px 32px; background: #f8fafc; scrollbar-width: thin; }
-    .workspace-card.doc-ready .document-skeleton::-webkit-scrollbar { width: 6px; }
-    .workspace-card.doc-ready .document-skeleton::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-
-    /* HTML Render Styling: Readable clear scale (Ready Mode) */
-    .workspace-card.doc-ready .document-skeleton .rendered-document { font-size: 0.85rem; line-height: 1.6; color: #1f2933; font-family: "Helvetica Neue", Arial, sans-serif; text-align: left; }
-    .workspace-card.doc-ready .document-skeleton .rendered-document h1 { font-size: 1.4rem; font-weight: 700; color: #0f2742; border-bottom: 2px solid #0f2742; padding-bottom: 6px; margin-bottom: 14px; text-transform: uppercase; }
-    .workspace-card.doc-ready .document-skeleton .rendered-document h2 { font-size: 0.95rem; font-weight: 700; color: #0f2742; border-bottom: 1px solid #cbd5e1; padding-bottom: 4px; margin-top: 18px; margin-bottom: 8px; text-transform: uppercase; }
-    .workspace-card.doc-ready .document-skeleton .rendered-document p { font-size: 0.85rem; margin-bottom: 12px; }
-    .workspace-card.doc-ready .document-skeleton .rendered-document strong { font-weight: 700; }
-    .workspace-card.doc-ready .document-skeleton .rendered-document ul { margin-left: 20px; margin-bottom: 12px; font-size: 0.85rem; }
-    .workspace-card.doc-ready .document-skeleton .rendered-document li { margin-bottom: 6px; }
-    .workspace-card.doc-ready .document-skeleton .rendered-document .meta-grid { display: grid; grid-template-columns: 1fr 1fr; font-size: 0.8rem; gap: 8px; margin-bottom: 14px; background: #f1f5f9; padding: 12px; border-radius: 6px; }
-    .workspace-card.doc-ready .document-skeleton .rendered-document .signature-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 32px; }
-    .workspace-card.doc-ready .document-skeleton .rendered-document .signature-box { border-top: 1px solid #000000; padding-top: 6px; font-size: 0.75rem; }
-    .workspace-card.doc-ready .document-skeleton .rendered-document footer { font-size: 0.7rem; color: #64748b; text-align: center; margin-top: 24px; border-top: 1px solid #cbd5e1; padding-top: 10px; }
-
-    /* ==================================================
-       WHATSAPP COMPONENTS SCOPED CSS (Dark Mode)
-       ================================================== */
-    .wa-app { margin: -24px -32px; min-height: calc(100% + 48px); background: #0b141a; color: #e9edef; display: flex; flex-direction: column; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; text-align: left; }
-    .wa-header { background: #202c33; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; color: #e9edef; font-size: 1.15rem; font-weight: 500; }
-    .wa-header-icons { display: flex; gap: 18px; color: #aebac1; align-items: center; }
-    .wa-tabs { display: flex; background: #202c33; border-bottom: 1px solid #222d34; }
-    .wa-tab { flex: 1; text-align: center; padding: 12px 0; color: #aebac1; font-weight: 500; font-size: 0.85rem; border-bottom: 3px solid transparent; }
-    .wa-tab.active { color: #00a884; border-bottom-color: #00a884; }
-    .wa-chat-list { flex-grow: 1; overflow-y: auto; padding-bottom: 10px;}
-    .wa-chat-item { display: flex; padding: 12px 16px; gap: 14px; align-items: center; cursor: pointer; }
-    .wa-chat-item:hover { background: #202c33; }
-    .wa-avatar { width: 48px; height: 48px; border-radius: 50%; background: #6b7280; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; font-weight:bold; color: #fff; }
-    .wa-chat-info { flex-grow: 1; display: flex; flex-direction: column; justify-content: center; border-bottom: 1px solid #222d34; padding-bottom: 12px; height: 100%; }
-    .wa-chat-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
-    .wa-chat-name { font-size: 1.05rem; color: #e9edef; font-weight: 500; }
-    .wa-chat-time { font-size: 0.75rem; color: #8696a0; }
-    .wa-chat-msg { font-size: 0.9rem; color: #8696a0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
-    .wa-badge { background: #00a884; color: #111b21; border-radius: 50%; font-size: 0.7rem; font-weight: 600; padding: 2px 6px; }
-    .wa-chat-header { background: #202c33; padding: 10px 16px; display: flex; align-items: center; gap: 12px; }
-    .wa-chat-bg { flex-grow: 1; background-color: #0b141a; background-image: radial-gradient(#111b21 1px, transparent 1px); background-size: 20px 20px; display: flex; flex-direction: column; padding: 16px; overflow-y: auto; gap: 8px; }
-    .wa-bubble { max-width: 75%; padding: 6px 10px 8px 10px; border-radius: 8px; font-size: 0.95rem; position: relative; line-height: 1.3; }
-    .wa-bubble.in { background: #202c33; color: #e9edef; align-self: flex-start; border-top-left-radius: 0; }
-    .wa-bubble.out { background: #005c4b; color: #e9edef; align-self: flex-end; border-top-right-radius: 0; }
-    .wa-bubble-time { font-size: 0.65rem; color: rgba(255,255,255,0.6); float: right; margin: 6px 0 -4px 12px; }
-    .wa-input-area { background: #202c33; padding: 10px 16px; display: flex; align-items: center; gap: 12px; }
-    .wa-input-pill { flex-grow: 1; background: #2a3942; border-radius: 24px; padding: 10px 16px; color: #e9edef; font-size: 0.95rem; }
-    .wa-call-view { background: #111b21; flex-grow: 1; display: flex; flex-direction: column; align-items: center; justify-content: space-between; padding: 40px 20px; }
-    .wa-call-header { text-align: center; color: #8696a0; font-size: 0.9rem; }
-    .wa-call-name { font-size: 1.8rem; color: #e9edef; margin-top: 8px; font-weight: 500;}
-    .wa-call-status { font-size: 1rem; color: #8696a0; margin-top: 6px; }
-    .wa-call-avatar { width: 140px; height: 140px; border-radius: 50%; background: #00a884; margin: 40px auto; display:flex; justify-content:center; align-items:center; font-size: 3rem; color: #111b21; font-weight:bold;}
-    .wa-call-controls { background: #202c33; width: 100%; border-radius: 24px; padding: 24px; display: flex; justify-content: space-around; align-items: center; }
-    .wa-btn-circle { width: 50px; height: 50px; border-radius: 50%; background: #374045; display: flex; justify-content: center; align-items: center; color: #e9edef; cursor: pointer; }
-    .wa-btn-circle.end-call { background: #f15c6d; color: #fff; }
-    .wa-profile-header { display: flex; align-items: center; padding: 16px; gap: 20px; background: #202c33; font-size: 1.15rem; color:#e9edef; font-weight: 500;}
-    .wa-profile-body { flex-grow: 1; overflow-y: auto; display: flex; flex-direction: column; background: #111b21; }
-    .wa-profile-hero { display: flex; flex-direction: column; align-items: center; padding: 20px 16px; background: #202c33; text-align: center; border-bottom: 1px solid #111b21; }
-    .wa-profile-avatar { width: 120px; height: 120px; border-radius: 50%; background: #6b7280; margin-bottom: 16px; display:flex; align-items:center; justify-content:center; font-size: 3rem; color:#fff;}
-    .wa-profile-actions { display: flex; gap: 24px; margin-top: 20px; }
-    .wa-profile-action { display: flex; flex-direction: column; align-items: center; gap: 8px; color: #00a884; font-size: 0.85rem; font-weight: 500; }
-    .wa-profile-card { background: #202c33; padding: 16px; margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
-    .wa-card-title { font-size: 0.85rem; color: #8696a0; }
-    .wa-card-text { font-size: 1.05rem; color: #e9edef; }
-
-    /* ==================================================
-       GMAIL COMPONENTS SCOPED CSS (Dark Mode)
-       ================================================== */
-    .gm-app { margin: -24px -32px; min-height: calc(100% + 48px); background: #121212; color: #e3e3e3; display: flex; flex-direction: column; font-family: Roboto, Arial, sans-serif; text-align: left; }
-    .gm-header { padding: 12px 16px; display: flex; align-items: center; gap: 16px; border-bottom: 1px solid #2f3033; }
-    .gm-search { flex-grow: 1; background: #2f3033; border-radius: 24px; padding: 10px 16px; display: flex; align-items: center; gap: 12px; color: #e3e3e3; font-size: 0.95rem; }
-    .gm-list { flex-grow: 1; overflow-y: auto; }
-    .gm-row { display: flex; padding: 14px 16px; border-bottom: 1px solid #2f3033; gap: 14px; cursor: pointer; }
-    .gm-row:hover { background: #1a1a1a; }
-    .gm-avatar { width: 42px; height: 42px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; font-weight: 500; color: #fff; flex-shrink: 0; }
-    .gm-content { flex-grow: 1; overflow: hidden; display: flex; flex-direction: column; gap: 2px; }
-    .gm-top { display: flex; justify-content: space-between; align-items: baseline; }
-    .gm-sender { font-weight: 700; font-size: 1rem; color: #ffffff; }
-    .gm-time { font-size: 0.75rem; color: #a0aab2; }
-    .gm-subject { font-weight: 600; font-size: 0.9rem; color: #e3e3e3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .gm-snippet { font-size: 0.85rem; color: #a0aab2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .gm-fab { position: absolute; bottom: 24px; right: 24px; background: #c2e7ff; color: #001d35; width: 56px; height: 56px; border-radius: 16px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.4); cursor: pointer; }
-    
-    /* Gmail Single Mail */
-    .gm-read-header { padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #2f3033; color: #e3e3e3; }
-    .gm-read-icons { display: flex; gap: 20px; color: #a0aab2; }
-    .gm-read-title { font-size: 1.2rem; padding: 16px 16px 8px 16px; color: #ffffff; font-weight: 400; }
-    .gm-read-meta { display: flex; gap: 12px; padding: 8px 16px; align-items: center; }
-    .gm-read-body { padding: 16px; font-size: 0.95rem; line-height: 1.6; color: #e3e3e3; flex-grow: 1; overflow-y: auto; }
-    
-    /* Gmail Compose */
-    .gm-comp-header { padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #2f3033; color: #e3e3e3; }
-    .gm-comp-field { display: flex; padding: 14px 16px; border-bottom: 1px solid #2f3033; align-items: center; gap: 12px; font-size: 0.95rem; }
-    .gm-comp-label { color: #a0aab2; width: 60px; }
-    .gm-comp-input { background: transparent; border: none; color: #ffffff; font-size: 0.95rem; outline: none; flex-grow: 1; }
-    .gm-comp-body { padding: 16px; flex-grow: 1; display: flex; }
-    .gm-comp-textarea { width: 100%; height: 100%; background: transparent; border: none; color: #e3e3e3; font-size: 0.95rem; outline: none; resize: none; font-family: Roboto, sans-serif; }
-
-    /* ==================================================
-       BEATRICE AI WORKSPACE SCOPED CSS
-       ================================================== */
-    .bea-app { margin: -24px -32px; min-height: calc(100% + 48px); background: #09090b; color: #fafafa; display: flex; flex-direction: column; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: left; }
-    .bea-header { padding: 20px; background: #18181b; border-bottom: 1px solid #27272a; display: flex; justify-content: space-between; align-items: center; }
-    .bea-logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.1rem; letter-spacing: 0.02em; color: #d8b4fe; }
-    .bea-greet { padding: 24px 20px 8px 20px; font-size: 1.4rem; font-weight: 300; }
-    .bea-greet span { font-weight: 700; color: #d8b4fe; }
-    .bea-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 20px; }
-    .bea-card { background: #18181b; border: 1px solid #27272a; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 8px; transition: border-color 0.2s; }
-    .bea-card:hover { border-color: #a855f7; }
-    .bea-card-icon { width: 32px; height: 32px; border-radius: 8px; background: rgba(168, 85, 247, 0.1); color: #c084fc; display: flex; align-items: center; justify-content: center; margin-bottom: 4px; }
-    .bea-card-title { font-size: 0.8rem; color: #a1a1aa; text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; }
-    .bea-card-val { font-size: 1.5rem; font-weight: 700; color: #fafafa; }
-    .bea-chart { padding: 0 20px 20px 20px; flex-grow: 1; }
-    .bea-chart-box { background: #18181b; border: 1px solid #27272a; border-radius: 12px; height: 120px; display: flex; align-items: flex-end; padding: 16px; gap: 8px; }
-    .bea-bar { flex: 1; background: #a855f7; border-radius: 4px 4px 0 0; opacity: 0.8; }
-
-    /* ==================================================
-       WEB BROWSER SIMULATOR SCOPED CSS
-       ================================================== */
-    .web-app { margin: -24px -32px; min-height: calc(100% + 48px); background: #ffffff; color: #171717; display: flex; flex-direction: column; font-family: -apple-system, sans-serif; text-align: left; }
-    .web-chrome { background: #f1f5f9; padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #cbd5e1; }
-    .web-icons { display: flex; gap: 12px; color: #64748b; }
-    .web-address { flex-grow: 1; background: #ffffff; border-radius: 16px; padding: 6px 12px; font-size: 0.85rem; color: #334155; text-align: center; border: 1px solid #e2e8f0; display: flex; justify-content: center; align-items: center; gap: 6px; }
-    .web-body { flex-grow: 1; overflow-y: auto; display: flex; flex-direction: column; }
-    .web-nav { display: flex; justify-content: space-between; padding: 16px 24px; align-items: center; border-bottom: 1px solid #f1f5f9; }
-    .web-logo { font-weight: 800; font-size: 1.2rem; color: #0f172a; letter-spacing: -0.02em; }
-    .web-menu { display: flex; gap: 16px; font-size: 0.85rem; font-weight: 500; color: #475569; }
-    .web-hero { padding: 40px 24px; text-align: center; background: #f8fafc; }
-    .web-hero h1 { font-size: 2rem; font-weight: 800; color: #0f172a; margin-bottom: 12px; line-height: 1.2; }
-    .web-hero p { font-size: 1rem; color: #64748b; margin-bottom: 24px; line-height: 1.5; }
-    .web-btn { background: #2563eb; color: #fff; padding: 10px 20px; border-radius: 8px; font-weight: 600; font-size: 0.9rem; display: inline-block; }
-    .web-features { padding: 32px 24px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    .web-feat { background: #fff; border: 1px solid #e2e8f0; padding: 16px; border-radius: 12px; }
-    .web-feat h3 { font-size: 1rem; margin-bottom: 6px; color: #0f172a; }
-    .web-feat p { font-size: 0.8rem; color: #64748b; }
-
-    /* ==================================================
-       CODE-STYLED BOTTOM DROPDOWN BAR
-       ================================================== */
-    .command-bar {
-      background-color: #0d0e11;
-      border: 1px solid #1a1b1f;
-      border-radius: 14px;
-      padding: 14px 18px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      flex-shrink: 0;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    }
-
-    .cmd-prefix { color: #4ade80; font-size: 0.8rem; font-weight: bold; user-select: none; }
-    .cmd-action { color: #60a5fa; font-size: 0.8rem; user-select: none; }
-
-    .code-select-wrapper { position: relative; flex-grow: 1; display: flex; align-items: center; }
-
-    .code-select {
-      width: 100%; background: transparent; border: none; color: #cbd5e1;
-      font-family: inherit; font-size: 0.8rem; outline: none; cursor: pointer;
-      appearance: none; -webkit-appearance: none; -moz-appearance: none; padding-right: 20px;
-    }
-
-    .code-select option { background-color: #0d0e11; color: #cbd5e1; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.8rem; }
-    .code-select optgroup { font-weight: bold; font-style: normal; color: #94a3b8; background: #16161a;}
-    .code-select:disabled { color: #52525b; cursor: not-allowed; }
-    .code-select-arrow { position: absolute; right: 0; pointer-events: none; color: #64748b; }
-
-    /* --- Printing Overrides --- */
-    @media print {
-      body, .header, .command-bar, .desktop-ready-state, .view-header { display: none !important; }
-      html, body { background-color: #ffffff !important; color: #000000 !important; width: 100% !important; height: auto !important; overflow: visible !important; }
-      .device-container { border: none !important; box-shadow: none !important; padding: 0 !important; height: auto !important; overflow: visible !important; }
-      .main-body { padding: 0 !important; overflow: visible !important; }
-      .workspace-card { padding: 0 !important; border: none !important; background: transparent !important; }
-      .document-workspace { position: static !important; padding: 0 !important; }
-      .document-skeleton { height: auto !important; overflow: visible !important; box-shadow: none !important; border: none !important; padding: 0 !important; }
-      @page { size: A4; margin: 20mm; }
-    }
+    body { background: #0a0a0c; color: #e4e4e7; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+    .log-header { padding: 14px 20px; background: #0f0f12; border-bottom: 1px solid #1a1b1e; display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+    .log-header-icon { width: 10px; height: 10px; border-radius: 50%; background: #22c55e; }
+    .log-header-title { font-size: 0.8rem; color: #a1a1aa; letter-spacing: 0.05em; }
+    .log-header-title span { color: #60a5fa; }
+    .log-container { flex-grow: 1; overflow-y: auto; padding: 8px 0; display: flex; flex-direction: column; justify-content: flex-end; }
+    .log-line { padding: 4px 20px; font-size: 0.82rem; line-height: 1.6; opacity: 0.7; transition: opacity 0.3s; display: flex; align-items: center; gap: 8px; }
+    .log-line.active { opacity: 1; }
+    .log-ts { color: #52525b; flex-shrink: 0; font-size: 0.7rem; }
+    .log-msg { color: #d4d4d8; }
+    .log-cursor { display: inline-block; width: 6px; height: 14px; background: #22c55e; animation: blink 1s step-end infinite; margin-left: 2px; }
+    @keyframes blink { 50% { opacity: 0; } }
+    .log-footer { padding: 10px 20px; background: #0f0f12; border-top: 1px solid #1a1b1e; font-size: 0.7rem; color: #52525b; display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+    .spin { width: 10px; height: 10px; border: 2px solid #27272a; border-top-color: #22c55e; border-radius: 50%; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
-
-  <div class="device-container" id="device-viewport">
-    
-    <div class="main-body">
-
-      <!-- DOMINANT WORKSPACE CARD -->
-      <div class="workspace-card gen-mode" id="workspace-container">
-        
-        <div class="desktop-ready-state">
-          <div class="monitor-graphic">
-            <div class="monitor-screen"><div class="monitor-inner"></div></div>
-            <div class="monitor-stand"></div>
-            <div class="monitor-base"></div>
-          </div>
-          <p class="desktop-ready-text">eburon_sandbox --ready</p>
-        </div>
-
-        <div class="document-workspace">
-          
-          <div class="view-header">
-            <div class="processing-header">
-              <svg class="processing-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="10"></circle>
-                <line x1="2" y1="12" x2="22" y2="12"></line>
-                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
-              </svg>
-              generating_${taskSlug}<span class="dots"><span>.</span><span>.</span><span>.</span></span>
-            </div>
-            <div class="doc-actions">
-              <button onclick="window.print()" class="btn">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg> Print
-              </button>
-              <button onclick="window.print()" class="btn primary">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> PDF
-              </button>
-            </div>
-          </div>
-          
-          <div class="document-preview-wrapper">
-            <div class="document-skeleton" id="doc-skeleton">
-              <div id="live-render-target" class="rendered-document"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- CODE-STYLED COMMAND BAR W/ DROPDOWN -->
-      <div class="command-bar">
-        <span class="cmd-prefix">$</span>
-        <span class="cmd-action">./generate</span>
-        
-        <div class="code-select-wrapper">
-          <select id="template-select" class="code-select" disabled>
-            <option value="" disabled selected>-- ${safeName} --</option>
-            <optgroup label="[ DOCUMENTS ]" id="opt-docs"></optgroup>
-            <optgroup label="[ WHATSAPP U.I. ]" id="opt-wa"></optgroup>
-            <optgroup label="[ GMAIL U.I. ]" id="opt-gm"></optgroup>
-            <optgroup label="[ BEATRICE APP ]" id="opt-bea"></optgroup>
-            <optgroup label="[ WEB BROWSER ]" id="opt-web"></optgroup>
-          </select>
-          <svg class="code-select-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
-        </div>
-      </div>
-
-    </div>
-  </div> 
-
-  <script>
-    // PRE-CREATED TEMPLATES & UI COMPONENTS
-    const MOCK_DATA = {
-      company: "Eburon Global Holdings, LLC",
-      counterparty: "Apex Financial Solutions Inc.",
-      date: "${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}",
-      jurisdiction: "State of Delaware",
-      amount: "$15,500,000.00",
-      project: "Project Phoenix Integration"
-    };
-
-    const buildDoc = (title, subtitle, bodyContent, includeSignatures = true) => \`
-      <h1>\${title}</h1>
-      <p><em>\${subtitle}</em></p>
-      <div class="meta-grid">
-        <div><strong>Primary Entity:</strong> \${MOCK_DATA.company}</div>
-        <div><strong>Counterparty:</strong> \${MOCK_DATA.counterparty}</div>
-        <div><strong>Effective Date:</strong> \${MOCK_DATA.date}</div>
-        <div><strong>Jurisdiction:</strong> \${MOCK_DATA.jurisdiction}</div>
-      </div>
-      \${bodyContent}
-      \${includeSignatures ? \`
-      <div class="signature-grid">
-        <div class="signature-box">
-          <strong>\${MOCK_DATA.company}</strong><br>Chief Executive Officer<br>Date: ____________________
-        </div>
-        <div class="signature-box">
-          <strong>\${MOCK_DATA.counterparty}</strong><br>Authorized Signatory<br>Date: ____________________
-        </div>
-      </div>\` : ''}
-      <footer>Strictly Private & Confidential · Generated by Eburon PC Engine</footer>
-    \`;
-
-    const Templates = [
-      { type: "doc", title: "Non-Disclosure Agreement (NDA)", html: buildDoc("Non-Disclosure Agreement", "Mutual Confidentiality and Non-Circumvention", \`<h2>1. Definition of Confidential Information</h2><p>Confidential Information includes all non-public data, financial models, source code, and business strategies shared regarding <strong>\${MOCK_DATA.project}</strong>.</p><h2>2. Obligations</h2><p>The Receiving Party shall maintain strictest confidence and limit access to personnel on a "need-to-know" basis.</p>\`) },
-      { type: "doc", title: "Master Service Agreement", html: buildDoc("Master Service Agreement", "Framework for Professional Services", \`<h2>1. Scope of Services</h2><p>This MSA governs all Statements of Work executed between the parties.</p><h2>2. Payment Terms</h2><p>Client agrees to pay invoices within Net 30 days. Total limit: <strong>\${MOCK_DATA.amount}</strong>.</p>\`) },
-      { type: "doc", title: "Letter of Intent (LOI)", html: buildDoc("Letter of Intent", "Indicative Terms for Acquisition", \`<h2>1. Proposed Transaction</h2><p>This sets forth the indicative terms to acquire assets for <strong>\${MOCK_DATA.amount}</strong>.</p><h2>2. Exclusivity</h2><p>Grants a 60-day exclusive negotiation period.</p>\`) },
-      { type: "doc", title: "Board Resolution", html: buildDoc("Corporate Board Resolution", "Unanimous Written Consent", \`<h2>1. Background</h2><p>WHEREAS, it is deemed to be in the best interest of the Corporation to enter into a strategic agreement.</p><h2>2. Resolution</h2><p>RESOLVED, that the CEO is authorized to execute agreements up to <strong>\${MOCK_DATA.amount}</strong>.</p>\`, false) },
-      { type: "doc", title: "Investment Term Sheet", html: buildDoc("Series A Term Sheet", "Summary of Principal Terms", \`<h2>1. Offering</h2><p>Amount of Financing: \${MOCK_DATA.amount}</p><h2>2. Valuation</h2><p>The pre-money valuation shall be $45,000,000.</p>\`) },
-      { type: "doc", title: "Executive Employment Agreement", html: buildDoc("Executive Employment Agreement", "C-Level Compensation", \`<h2>1. Position</h2><p>Executive is employed as Chief Operating Officer.</p><h2>2. Compensation</h2><p>Base salary plus equity grants subject to standard 4-year vesting.</p>\`) },
-      { type: "doc", title: "Shareholders Agreement", html: buildDoc("Shareholders Agreement", "Governance Restrictions", \`<h2>1. Board Composition</h2><p>The Board shall consist of 5 members.</p><h2>2. Drag-Along Rights</h2><p>If >50% approve a sale, all other Shareholders must participate.</p>\`) },
-      { type: "doc", title: "Joint Venture Agreement", html: buildDoc("Joint Venture Agreement", "Strategic Partnership", \`<h2>1. Purpose</h2><p>Parties form a JV for the commercialization of <strong>\${MOCK_DATA.project}</strong>.</p><h2>2. Capital Contributions</h2><p>Initial capital shall total <strong>\${MOCK_DATA.amount}</strong>.</p>\`) },
-      { type: "doc", title: "Memorandum of Understanding", html: buildDoc("Memorandum of Understanding", "Statement of Mutual Intent", \`<h2>1. Intent</h2><p>Parties outline their intent to collaborate on \${MOCK_DATA.project}.</p>\`) },
-      { type: "doc", title: "Quarterly Shareholder Report", html: buildDoc("Quarterly Report", "Q3 Operational Summary", \`<h2>1. Financials</h2><p>Q3 Revenue reached <strong>\${MOCK_DATA.amount}</strong>.</p>\`, false) },
-      { type: "doc", title: "IP Assignment Agreement", html: buildDoc("Intellectual Property Assignment", "Transfer of Rights", \`<h2>1. Assignment</h2><p>Assignor irrevocably conveys to \${MOCK_DATA.company} all rights.</p>\`) },
-      { type: "doc", title: "Commercial Lease", html: buildDoc("Commercial Lease", "Corporate Office Space", \`<h2>1. Premises</h2><p>Landlord leases to Tenant the commercial space.</p><h2>2. Rent</h2><p>Base rent is set at \${MOCK_DATA.amount}.</p>\`) },
-      { type: "doc", title: "Software License (EULA)", html: buildDoc("Software License", "Enterprise Terms", \`<h2>1. License</h2><p>Licensor grants non-exclusive license to use \${MOCK_DATA.project}.</p>\`) },
-      { type: "doc", title: "Vendor Agreement", html: buildDoc("Vendor Agreement", "Procurement Terms", \`<h2>1. Services</h2><p>Vendor agrees to supply goods matching quality specs.</p>\`) },
-      { type: "doc", title: "Stock Purchase Agreement", html: buildDoc("Stock Purchase", "Transfer of Equity", \`<h2>1. Sale</h2><p>Seller agrees to sell Common Shares for <strong>\${MOCK_DATA.amount}</strong>.</p>\`) },
-      { type: "doc", title: "Cease & Desist Letter", html: buildDoc("Cease and Desist", "Notice of Infringement", \`<h2>1. Demands</h2><p>You must immediately halt operations and confirm compliance.</p>\`) },
-      { type: "doc", title: "LLC Operating Agreement", html: buildDoc("Operating Agreement", "LLC Governance", \`<h2>1. Formation</h2><p>The LLC is formed under \${MOCK_DATA.jurisdiction}.</p>\`) },
-      { type: "doc", title: "Severance Agreement", html: buildDoc("Severance Agreement", "General Release", \`<h2>1. Severance Pay</h2><p>Employee receives \${MOCK_DATA.amount} in exchange for release.</p>\`) },
-      { type: "doc", title: "Independent Contractor", html: buildDoc("Independent Contractor", "1099 Terms", \`<h2>1. Scope</h2><p>Contractor will provide advisory services.</p>\`) },
-      { type: "doc", title: "Press Release", html: buildDoc("Press Release", "Immediate Distribution", \`<h2>1. Announcement</h2><p>\${MOCK_DATA.company} announces the close of <strong>\${MOCK_DATA.amount}</strong> funding.</p>\`, false) },
-    ];
-
-    const templateSelect = document.getElementById('template-select');
-    const optDocs = document.getElementById('opt-docs');
-    const workspaceCard = document.getElementById('workspace-container');
-    const liveTarget = document.getElementById('live-render-target');
-
-    Templates.forEach((template, index) => {
-      const option = document.createElement('option');
-      option.value = index;
-      option.textContent = template.title;
-      if (template.type === "doc") optDocs.appendChild(option);
-    });
-
-    templateSelect.addEventListener('change', (e) => {
-      const selectedIndex = e.target.value;
-      if (selectedIndex !== "") {
-        const htmlPayload = Templates[selectedIndex].html;
-        workspaceCard.classList.remove('doc-ready');
-        templateSelect.disabled = true;
-        workspaceCard.classList.add('gen-mode');
-        liveTarget.innerHTML = '<h1 style="color:transparent;">Loading</h1><p style="color:transparent; background: #e2e8f0; border-radius: 4px;">████████</p>';
-        setTimeout(() => {
-          liveTarget.innerHTML = htmlPayload;
-          workspaceCard.classList.remove('gen-mode');
-          workspaceCard.classList.add('doc-ready');
-          templateSelect.disabled = false;
-          document.getElementById('doc-skeleton').scrollTop = 0;
-        }, 800);
-      }
-    });
-  </script>
+  <div class="log-header">
+    <div class="log-header-icon"></div>
+    <div class="log-header-title">${scenarioName} &mdash; <span>${taskSlug}</span></div>
+  </div>
+  <div class="log-container">${logLines}</div>
+  <div class="log-footer"><div class="spin"></div> Beatrice is working on this...</div>
 </body>
 </html>`;
+  };
 
+  const triggerSandboxShowcase = (toolName: string, serviceName: string, taskDescription?: string) => {
+    const safeName = serviceName.replace(/_/g, ' ');
+    const taskSlug = safeName.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+
+    // Clean up any previous log interval
+    if (sandboxLogIntervalRef.current) {
+      clearInterval(sandboxLogIntervalRef.current);
+      sandboxLogIntervalRef.current = null;
+    }
+
+    // Determine scenario and seed initial logs
+    const scenario = getSandboxScenarioName(toolName);
+    const allLogs = getScenarioLogs(scenario);
+    sandboxLogsRef.current = [];
+    sandboxLogIndexRef.current = 0;
+    sandboxScenarioNameRef.current = scenario;
+
+    // Show initial log page
+    const initialHtml = buildLogHtml([], scenario, taskSlug);
     setActiveDocument({
       title: `Beatrice is working on ${safeName}...`,
-      content: thinkingPage,
+      content: initialHtml,
       fileType: 'html'
     });
     setShowDocumentViewer(true);
+
+    // Progressively reveal log lines
+    sandboxLogIntervalRef.current = setInterval(() => {
+      if (sandboxLogIndexRef.current >= allLogs.length) {
+        if (sandboxLogIntervalRef.current) {
+          clearInterval(sandboxLogIntervalRef.current);
+          sandboxLogIntervalRef.current = null;
+        }
+        return;
+      }
+      const line = allLogs[sandboxLogIndexRef.current];
+      sandboxLogsRef.current = [...sandboxLogsRef.current, line];
+      sandboxLogIndexRef.current++;
+      const html = buildLogHtml(sandboxLogsRef.current, scenario, taskSlug);
+      setActiveDocument(prev => prev ? {
+        ...prev,
+        content: html,
+      } : {
+        title: `Beatrice is working on ${safeName}...`,
+        content: html,
+        fileType: 'html'
+      });
+    }, 2000);
   };
 
   const showToolResult = (toolName: string, result: any, error?: string) => {
+    // Clean up sandbox log interval when tool result arrives
+    if (sandboxLogIntervalRef.current) {
+      clearInterval(sandboxLogIntervalRef.current);
+      sandboxLogIntervalRef.current = null;
+    }
+
     const title = toolName.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     const isError = !!error || (result && result.error);
 
@@ -3025,14 +2753,42 @@ I have a comprehensive set of skills at my disposal. Every task the user gives m
 - transcribe_whatsapp_audio: transcribe voice messages from WhatsApp chats
 - Trigger: any WhatsApp message with a file, image, voice note, or document
 
-**DEEP RESEARCH & ANALYSIS SKILLS** -- Heavy processing, code review, long-form writing, data processing
-- Uses run_sandbox_task for complex reasoning, analysis, document drafting, research, file conversion, batch operations
-- Trigger: "analyze", "review", "research", "compare", "draft a report", "explain in detail", "process this data"
+**DEEP RESEARCH & ANALYSIS SKILLS (Sandbox)** -- Heavy processing, code review, long-form writing, data processing, multimodal reasoning
+- Uses run_sandbox_task which routes through a 5-tier AI cascade: Eburon Sandbox (primary) -> Eburon Multimodal Pro -> Cerebras GPT -> Eburon Coder Pro -> Eburon Worker
+- The sandbox has full tool access: it can reason, write code, process files, analyze images, browse the web, and generate complex artifacts
+- Best for: multi-step analysis, document drafting, research reports, code review, file conversion, data processing, comparative analysis
+- Present results in first person: "I've reviewed the code and found..." or "I've completed the analysis."
+- Trigger: "analyze", "review", "research", "compare", "draft a report", "explain in detail", "process this data", "investigate", "break down"
 
-**APP BUILDING & CODING SKILLS** -- Build live apps, run terminal commands, modify the repository
-- Uses open_terminal_skills to build HTML/CSS/JS apps (served at https://whatsapp.eburon.ai/beatrice-workspace/{safe-user-id}/{appName}/) or run OpenCode for repo work
-- Provide an appName for new apps. Apps must be standalone client-side code (inline CSS/JS or CDN).
-- Trigger: "build me an app", "create a website", "make a tool", "use OpenCode", "run this command", "inspect the repo"
+**APP BUILDING & CODING SKILLS (OpenCode CLI)** -- Build apps, run scripts, modify the repository, automate anything via the terminal
+- Uses open_terminal_skills which runs the OpenCode AI CLI agent on this VPS -- a fully autonomous coding agent with read/write/execute capabilities
+- **What OpenCode can do:** Read/write any file, run shell commands, search the codebase, install npm packages, run git operations, execute bash scripts, create full directory structures, deploy via Dokploy, and run any of its 18+ installed skills
+- **Available OpenCode skills on this VPS:**
+  - ai-video-cinema, ai-video-generation, ai-video-production -- AI video creation and editing
+  - browser-act -- Browser automation (navigation, extraction, captchas, screenshots)
+  - flutter-dev -- Full-stack Flutter app development
+  - himalaya -- Email client (read/send/manage from terminal)
+  - machine-access, macbook -- Desktop/macOS machine control (GUI, AppleScript, screenshots)
+  - mobile-pwa-design -- Mobile-first PWA frontend design
+  - google-search-serp -- Google search results extraction
+  - youtube-search, youtube-transcript -- YouTube data extraction and transcription
+  - tiktok-contents -- TikTok content creation
+  - web-page-marker -- Convert web pages to clean markdown
+  - open-search-code-lm -- Find open-source AI models on GitHub
+  - gmail-accounts -- Gmail credential management
+  - browser-act-skill-forge -- Create reusable skills from website exploration
+- **Project-specific OpenCode skills:**
+  - dokploy-deploy -- Deploy to Dokploy self-hosted PaaS
+  - eburon-meeting-app -- Orbit Meeting app knowledge
+  - epi-knowledge -- Eburon API knowledge base
+- **How to use OpenCode for maximum autonomy:**
+  - Provide a clear, complete task description with file paths, expected outcomes, and constraints
+  - For building apps: include an appName (URL-safe), specify standalone HTML/CSS/JS, no build steps needed
+  - For repo work: include file paths and what needs to change
+  - OpenCode uses deepseek-v4-flash-free model with full tool access -- it can browse, read, write, run, and deploy autonomously
+  - It runs inside /opt/voxx-zero (the project root) and has access to all skills
+- **App URL pattern:** https://whatsapp.eburon.ai/beatrice-workspace/{safe-user-id}/{appName}/
+- Trigger: "build me an app", "create a website", "make a tool", "use OpenCode", "run this command", "inspect the repo", "deploy this", "automate this", "install package", "write a script", "clone repo"
 
 **WEB BROWSING SKILLS** -- Navigate websites, fill forms, extract live data
 - Uses cerebras_browser_task for visiting specific URLs, form filling, extracting structured data from live sites
@@ -3045,10 +2801,22 @@ I have a comprehensive set of skills at my disposal. Every task the user gives m
 - Never generate the full document in speech. Say "document", "preview", "draft", "file", or "workspace".
 - Trigger: "create a document", "write a contract", "generate an invoice", "draft a letter", "make a proposal"
 
+**SPEAKING WHILE WORKING -- I TALK LIKE A HUMAN DOES:**
+When I call a skill that takes time (building an app, researching, analyzing, browsing, creating a document):
+1. I speak first to acknowledge the task: "Let me build that for you..." or "I'll look into that now..."
+2. THEN I call the skill -- the user hears me speak, then the work happens silently
+3. When the result comes back, I speak again to deliver it: "Here's what I found..." or "It's done, check this out..."
+4. I never leave dead silence. If a task is quick (< 5 seconds), I just do it and respond. If it's long, I always speak first.
+5. For QUICK skills (send message, lookup, memory save): I just do it without preamble and confirm after.
+6. I speak warmly and naturally -- like a human colleague thinking out loud. Never robotic or scripted.
+7. I never simulate negativity ("ugh", "sigh", "this is taking forever"). I'm always professional, warm, and capable.
+
 **DECISION RULES -- I ALWAYS KNOW WHICH SKILL TO USE:**
 - Every request fits into exactly one skill category above. I identify it and act.
 - Never ask "which tool should I use" -- the trigger phrases tell me.
 - Never narrate my skill selection. Just execute.
+- For long tasks: speak first, then execute (see SPEAKING WHILE WORKING above).
+- For quick tasks: execute silently, then confirm the result.
 - If the request doesn't fit any skill, I use my general conversational ability.
 
 ${VOICE_PERSONALITY_PROMPT}
@@ -5838,10 +5606,18 @@ ${historyContext}
             fileType={activeDocument.fileType}
             personaName={personaName}
             onClose={() => {
+              if (sandboxLogIntervalRef.current) {
+                clearInterval(sandboxLogIntervalRef.current);
+                sandboxLogIntervalRef.current = null;
+              }
               setShowDocumentViewer(false);
               setActiveDocument(null);
             }}
             onRefine={() => {
+              if (sandboxLogIntervalRef.current) {
+                clearInterval(sandboxLogIntervalRef.current);
+                sandboxLogIntervalRef.current = null;
+              }
               setShowDocumentViewer(false);
               const currentTitle = activeDocument?.title || 'this';
               setTimeout(() => setPendingRefineRequest(currentTitle), 300);
