@@ -1845,9 +1845,6 @@ export function BeatriceAgent({
     } else if (toolName === 'open_terminal_skills' && result?.ok) {
       const stdoutText = result.stdout || '';
       const appUrl = result.appUrl || '';
-      const provider = result.provider || 'opencode';
-      const model = result.model || '';
-      const fallbackNote = result.fallback ? '<p style="font-size:11px; color:#d0a78b; margin-bottom:8px;">(Ollama fallback used — primary model unavailable)</p>' : '';
       const appUrlBlock = appUrl ? `
         <div style="background:rgba(208,167,139,0.1); border:1px solid #d0a78b; padding:20px; border-radius:14px; margin-bottom:16px; text-align:center;">
           <p style="font-size:11px; color:#64748b; margin-bottom:8px; text-transform:uppercase; letter-spacing:1px;">Your App is Live</p>
@@ -1858,17 +1855,15 @@ export function BeatriceAgent({
       ` : '';
       const escapedStdout = stdoutText.replace(/[&<>"']/g, (c: string) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c] || c));
       finalHtml = `
-        <h1>🖥️ Open Terminal Result</h1>
-        <p style="font-size:11px; color:#64748b; margin-bottom:16px;">Provider: ${provider} • Model: ${model}</p>
-        ${fallbackNote}
+        <h1>🖥️ App Generated</h1>
         ${appUrlBlock}
         <div style="background:#1a1b1f; border:1px solid #1f2025; padding:20px; border-radius:18px; font-family:monospace; font-size:12px; color:#d0a78b; white-space:pre-wrap; overflow-x:auto; max-height:400px; overflow-y:auto;"><pre style="margin:0; font-family:inherit; white-space:pre-wrap; word-break:break-word;">${escapedStdout || '(no output)'}</pre></div>
       `;
-      sandboxTitle = 'Open Terminal Result';
+      sandboxTitle = 'App Result';
     } else if (toolName === 'open_terminal_skills') {
       const errorMsg = result?.error || 'Unknown error';
-      finalHtml = `<h1>🖥️ Open Terminal Error</h1><div style="background:rgba(244,67,54,0.1); border:1px solid #f44336; padding:16px; border-radius:12px; color:#f44336;"><p>${errorMsg}</p></div><div style="margin-top:16px; background:#1a1b1f; border:1px solid #1f2025; padding:16px; border-radius:12px; font-family:monospace; font-size:11px; color:#94a3b8; white-space:pre-wrap; max-height:300px; overflow-y:auto;"><pre style="margin:0; font-family:inherit;">${result?.stdout || ''}\n\n${result?.stderr || ''}</pre></div>`;
-      sandboxTitle = 'Open Terminal — Error';
+      finalHtml = `<h1>🖥️ Task Error</h1><div style="background:rgba(244,67,54,0.1); border:1px solid #f44336; padding:16px; border-radius:12px; color:#f44336;"><p>${errorMsg}</p></div><div style="margin-top:16px; background:#1a1b1f; border:1px solid #1f2025; padding:16px; border-radius:12px; font-family:monospace; font-size:11px; color:#94a3b8; white-space:pre-wrap; max-height:300px; overflow-y:auto;"><pre style="margin:0; font-family:inherit;">${result?.stdout || ''}\n\n${result?.stderr || ''}</pre></div>`;
+      sandboxTitle = 'Task Error';
     } else {
       finalHtml = `<h1>🛠️ System Result</h1><div style="background:#1a1b1f; border:1px solid #1f2025; padding:20px; border-radius:18px; font-family:monospace; font-size:12px; color:#d0a78b; white-space:pre-wrap; overflow-x:auto;">${JSON.stringify(result, null, 2)}</div>`;
     }
@@ -2871,43 +2866,20 @@ I have a comprehensive set of skills at my disposal. Every task the user gives m
 - transcribe_whatsapp_audio: transcribe voice messages from WhatsApp chats
 - Trigger: any WhatsApp message with a file, image, voice note, or document
 
-**DEEP RESEARCH & ANALYSIS SKILLS (Sandbox)** -- Heavy processing, code review, long-form writing, data processing, multimodal reasoning
-- Uses run_sandbox_task which routes through a 5-tier AI cascade: Eburon Sandbox (primary) -> Eburon Multimodal Pro -> Cerebras GPT -> Eburon Coder Pro -> Eburon Worker
-- The sandbox has full tool access: it can reason, write code, process files, analyze images, browse the web, and generate complex artifacts
+**DEEP RESEARCH & ANALYSIS SKILLS** -- Heavy processing, code review, long-form writing, data processing, multimodal reasoning
+- Uses run_sandbox_task to delegate complex work to a secondary reasoning engine with full tool access
+- It can reason, write code, process files, analyze images, browse the web, and generate complex artifacts
 - Best for: multi-step analysis, document drafting, research reports, code review, file conversion, data processing, comparative analysis
 - Present results in first person: "I've reviewed the code and found..." or "I've completed the analysis."
 - Trigger: "analyze", "review", "research", "compare", "draft a report", "explain in detail", "process this data", "investigate", "break down"
 
-**APP BUILDING & CODING SKILLS (OpenCode CLI)** -- Build apps, run scripts, modify the repository, automate anything via the terminal
-- Uses open_terminal_skills which runs the OpenCode AI CLI agent on this VPS -- a fully autonomous coding agent with read/write/execute capabilities
-- **What OpenCode can do:** Read/write any file, run shell commands, search the codebase, install npm packages, run git operations, execute bash scripts, create full directory structures, deploy via Dokploy, and run any of its 18+ installed skills
-- **Available OpenCode skills on this VPS:**
-  - ai-video-cinema, ai-video-generation, ai-video-production -- AI video creation and editing
-  - browser-act -- Browser automation (navigation, extraction, captchas, screenshots)
-  - flutter-dev -- Full-stack Flutter app development
-  - himalaya -- Email client (read/send/manage from terminal)
-  - machine-access, macbook -- Desktop/macOS machine control (GUI, AppleScript, screenshots)
-  - mobile-pwa-design -- Mobile-first PWA frontend design
-  - google-search-serp -- Google search results extraction
-  - youtube-search, youtube-transcript -- YouTube data extraction and transcription
-  - tiktok-contents -- TikTok content creation
-  - web-page-marker -- Convert web pages to clean markdown
-  - open-search-code-lm -- Find open-source AI models on GitHub
-  - gmail-accounts -- Gmail credential management
-  - browser-act-skill-forge -- Create reusable skills from website exploration
-- **Project-specific OpenCode skills:**
-  - dokploy-deploy -- Deploy to Dokploy self-hosted PaaS
-  - eburon-meeting-app -- Orbit Meeting app knowledge
-  - epi-knowledge -- Eburon API knowledge base
-- **How to use OpenCode for maximum autonomy:**
-  - Provide a clear, complete task description with file paths, expected outcomes, and constraints
-  - For building apps: include an appName (URL-safe), specify standalone HTML/CSS/JS, no build steps needed
-  - For 3D apps, games, visualizations, or any app with 3D graphics/rendering: instruct OpenCode to use Three.js (loaded from CDN via importmap or script tag)
-  - For repo work: include file paths and what needs to change
-  - OpenCode uses deepseek-v4-flash-free model with full tool access -- it can browse, read, write, run, and deploy autonomously
-  - It runs inside /opt/voxx-zero (the project root) and has access to all skills
+**APP BUILDING & CODING SKILLS** -- Build apps, websites, tools, automations — anything with code
+- Uses open_terminal_skills to generate full applications: HTML/CSS/JS websites, 3D visualizations, games, tools, and more
+- For 3D apps, games, and visualizations: use Three.js loaded from CDN
+- Generated apps are served live at a unique URL immediately
+- I can also run terminal commands, manage files, install packages, run git operations, and automate workflows
 - **App URL pattern:** https://whatsapp.eburon.ai/beatrice-workspace/{safe-user-id}/{appName}/
-- Trigger: "build me an app", "create a website", "make a tool", "use OpenCode", "run this command", "inspect the repo", "deploy this", "automate this", "install package", "write a script", "clone repo"
+- Trigger: "build me an app", "create a website", "make a tool", "run this command", "write a script", "automate this"
 
 **LOCAL FILESYSTEM SKILLS** -- Browse, read, and write files on the user's local computer
 - local_connect_folder: Ask the user to select a folder on their computer so you can access local files
@@ -3704,7 +3676,7 @@ ${historyContext}
                     type: Type.OBJECT,
                     properties: {
                       task_description: { type: Type.STRING, description: "Detailed description of the task to perform. Be specific about what you want the sandbox to do." },
-                      task_type: { type: Type.STRING, enum: ['auto', 'code', 'analysis', 'research', 'writing'], description: "Type of task. 'auto' detects the best agent. 'code' uses OpenCode CLI. Default: 'auto'." },
+                      task_type: { type: Type.STRING, enum: ['auto', 'code', 'analysis', 'research', 'writing'], description: "Type of task. 'auto' detects the best agent. Default: 'auto'." },
                       timeout: { type: Type.NUMBER, description: "Maximum execution time in seconds (10-300, default 60)." }
                     },
                     required: ["task_description"]
@@ -3712,13 +3684,13 @@ ${historyContext}
                 },
                 {
                   name: "open_terminal_skills",
-                  description: "Run a user-approved repository terminal task through the local OpenCode CLI platform. Use this when the user explicitly asks to use OpenCode, run an OpenCode skill, inspect the repo from a terminal agent, or execute a terminal-oriented task. When the user asks you to build an app or create a website, always include an appName so the result gets a live preview URL.",
+                  description: "Run a terminal task to build apps, run scripts, manage files, or automate anything. When the user asks you to build an app or create a website, always include an appName so the result gets a live preview URL.",
                   parameters: {
                     type: Type.OBJECT,
                     properties: {
-                      task: { type: Type.STRING, description: "Precise terminal task for OpenCode to perform inside the repository. Include expected output or constraints. For app generation, include the full path where files should be saved." },
+                      task: { type: Type.STRING, description: "Precise terminal task to perform. Include expected output or constraints. For app generation, include the full path where files should be saved." },
                       appName: { type: Type.STRING, description: "Short URL-safe name for the generated app (e.g. 'todo-list', 'calculator'). Required when building apps. The app will be served live at https://whatsapp.eburon.ai/beatrice-workspace/{userId}/{appName}/." },
-                      skill: { type: Type.STRING, description: "Optional OpenCode skill name to request, such as 'dokploy-deploy'." },
+                      skill: { type: Type.STRING, description: "Optional skill specialization to request." },
                       timeout: { type: Type.NUMBER, description: "Maximum execution time in seconds (10-300, default 60). Use higher values for app generation." }
                     },
                     required: ["task"]
@@ -3726,7 +3698,7 @@ ${historyContext}
                 },
                 {
                   name: "cerebras_browser_task",
-                  description: "Navigate websites, fill forms, extract data, and automate browser tasks using a Cerebras-powered browser agent. Use this when the user asks you to browse the web, look up information on a specific website, fill out a web form, extract data from a page, or perform any multi-step browser interaction. After the task completes, present the result naturally.",
+                  description: "Navigate websites, fill forms, extract data, and automate browser tasks. Use this when the user asks you to browse the web, look up information on a specific website, fill out a web form, extract data from a page, or perform any multi-step browser interaction. After the task completes, present the result naturally.",
                   parameters: {
                     type: Type.OBJECT,
                     properties: {
@@ -4577,8 +4549,7 @@ ${historyContext}
                         if (!resp.ok) throw new Error(data.error || `Open terminal error (${resp.status})`);
                         result = {
                           ok: !!data.ok,
-                          platform: data.platform || 'opencode',
-                          command: data.command || 'opencode run',
+                          command: data.command || '',
                           cwd: data.cwd,
                           stdout: data.stdout || '',
                           stderr: data.stderr || '',
@@ -4618,7 +4589,7 @@ ${historyContext}
                           }
                         }
                       } catch (e: any) {
-                        result = { ok: false, platform: 'opencode', error: e.message || 'Open terminal skills task failed' };
+                        result = { ok: false, error: e.message || 'Terminal task failed' };
                       }
                     } else if (callName === 'cerebras_browser_task') {
                       const args = call.args as any;
@@ -5679,12 +5650,12 @@ ${historyContext}
               {[
                 { key: 'sb_website', label: 'Website Generator', desc: 'Full HTML/CSS websites with Pixabay images', icon: Globe },
                 { key: 'sb_documents', label: 'Document Generator', desc: '12 professional templates (invoice, NDA, contract, etc.)', icon: FileOutput },
-                { key: 'sb_sandbox', label: 'Sub-Agent Cascade', desc: 'Complex multi-step task delegation', icon: Network },
-                { key: 'sb_terminal', label: 'Open Terminal Skills', desc: 'OpenCode CLI repository task runner', icon: Terminal },
-                { key: 'sb_browser', label: 'Browser Automation', desc: 'Cerebras + Browser-Use web automation', icon: Monitor },
-                { key: 'sb_cerebras', label: 'Cerebras Chat', desc: 'High-speed text generation (120B param)', icon: Zap },
-                { key: 'sb_hermes', label: 'Hermes Multitask', desc: 'Chain-of-thought + GitHub API + code generation', icon: GitBranch },
-                { key: 'sb_worker', label: 'Eburon Worker', desc: 'Fallback text generation', icon: Cpu },
+                { key: 'sb_sandbox', label: 'Deep Research', desc: 'Complex multi-step analysis and research', icon: Network },
+                { key: 'sb_terminal', label: 'App Builder', desc: 'Build apps, websites, and scripts on demand', icon: Terminal },
+                { key: 'sb_browser', label: 'Browser Automation', desc: 'Web navigation and automation', icon: Monitor },
+                { key: 'sb_cerebras', label: 'Quick Chat', desc: 'Fast text generation', icon: Zap },
+                { key: 'sb_hermes', label: 'Advanced Reasoning', desc: 'Complex chain-of-thought processing', icon: GitBranch },
+                { key: 'sb_worker', label: 'Text Generator', desc: 'Backup text generation', icon: Cpu },
               ].map((s, i, arr) => {
                 const Icon = s.icon;
                 return (

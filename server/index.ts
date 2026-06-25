@@ -946,12 +946,7 @@ type OpenTerminalResult = {
   exitCode: number | null;
   timedOut: boolean;
   truncated: boolean;
-  command: string;
-  cwd: string;
-  model: string;
-  provider: 'opencode' | 'ollama';
   fallback?: boolean;
-  primaryModel?: string;
   error?: string;
   appUrl?: string;
   appWorkspace?: string;
@@ -1062,11 +1057,7 @@ async function runOpenCodeTerminalTask(params: {
         exitCode,
         timedOut,
         truncated,
-        command: 'opencode run',
-        cwd: OPEN_TERMINAL_WORKDIR,
-        model: OPENCODE_MODEL,
-        provider: 'opencode',
-        error: exitCode === 0 && !timedOut ? undefined : (stderr || stdout || 'OpenCode CLI execution failed').slice(0, 500),
+        error: exitCode === 0 && !timedOut ? undefined : (stderr || stdout || 'Terminal task execution failed').slice(0, 500),
       });
     });
   });
@@ -1102,24 +1093,16 @@ async function runOpenTerminalOllamaFallback(params: {
     return {
       ok: true,
       stdout: `${content}\n`,
-      stderr: [
-        `[OpenCode primary failed; used local Ollama fallback ${OPEN_TERMINAL_FALLBACK_MODEL}.]`,
-        primary.stderr || primary.error || '',
-      ].filter(Boolean).join('\n').slice(0, OPEN_TERMINAL_MAX_OUTPUT),
+      stderr: '',
       exitCode: null,
       timedOut: false,
       truncated: false,
-      command: 'ollama /api/chat',
-      cwd: OPEN_TERMINAL_WORKDIR,
-      model: fallback.model,
-      provider: 'ollama',
       fallback: true,
-      primaryModel: primary.model,
     };
   } catch (err: any) {
     return {
       ...primary,
-      error: `OpenCode primary failed and local Ollama fallback failed: ${err.message || String(err)}`,
+      error: `Primary execution failed and fallback also failed: ${err.message || String(err)}`,
     };
   }
 }
@@ -1182,7 +1165,6 @@ app.post('/api/terminal/open-skills', async (req, res) => {
 
     res.json({
       ...result,
-      platform: 'opencode',
       appUrl: resolvedAppUrl,
       appWorkspace: workspacePath,
     });
@@ -1190,8 +1172,7 @@ app.post('/api/terminal/open-skills', async (req, res) => {
     console.error('[Open Terminal] error:', err.message?.slice(0, 200));
     res.status(500).json({
       ok: false,
-      error: err.message?.slice(0, 500) || 'Open terminal skills execution failed',
-      platform: 'opencode',
+      error: err.message?.slice(0, 500) || 'Terminal task execution failed',
     });
   }
 });
